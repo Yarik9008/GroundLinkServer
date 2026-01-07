@@ -9,9 +9,9 @@ import os
 from datetime import datetime
 from Logger import Logger
 
-# Размер чанка для передачи данных (256 KB) - должен совпадать с размером на клиенте
-# Увеличенный размер чанка повышает производительность передачи
-CHUNK_SIZE = 262144  # 256 KB
+# Размер чанка для передачи данных (1 MB) - должен совпадать с размером на клиенте
+# Больший чанк снижает накладные расходы на syscalls и копирование
+CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
 class ImageServer:
@@ -62,19 +62,45 @@ class ImageServer:
             ConnectionError: Если соединение разорвано
             socket.timeout: Если превышено время ожидания
         """
-        data = b''
-        while len(data) < size:
+        # ВАЖНО: не используем data += chunk (квадратичное копирование).
+        buf = bytearray(size)
+        view = memoryview(buf)
+        received = 0
+        while received < size:
             try:
-                # Читаем чанками - используем общую константу, синхронизированную с клиентом
-                chunk = client_socket.recv(min(CHUNK_SIZE, size - len(data)))
-                if not chunk:
+                n = client_socket.recv_into(
+                    view[received:],
+                    min(CHUNK_SIZE, size - received),
+                )
+                if n == 0:
                     raise ConnectionError("Соединение разорвано: клиент отключился")
-                data += chunk
+                received += n
             except socket.timeout:
-                raise ConnectionError(f"Таймаут при получении данных: получено {len(data)}/{size} байт")
+                raise ConnectionError(f"Таймаут при получении данных: получено {received}/{size} байт")
             except socket.error as e:
                 raise ConnectionError(f"Ошибка сокета при получении данных: {e}")
-        return data
+        return bytes(buf)
+
+    def _receive_to_file(self, client_socket, file_obj, size):
+        """
+        Потоково получает `size` байт и пишет в file_obj.
+        Это быстрее и не требует держать всё изображение в памяти.
+        """
+        remaining = size
+        buf = bytearray(min(CHUNK_SIZE, max(1, remaining)))
+        view = memoryview(buf)
+        while remaining > 0:
+            try:
+                n = client_socket.recv_into(view, min(len(buf), remaining))
+                if n == 0:
+                    raise ConnectionError("Соединение разорвано: клиент отключился")
+                file_obj.write(view[:n])
+                remaining -= n
+            except socket.timeout:
+                done = size - remaining
+                raise ConnectionError(f"Таймаут при получении файла: получено {done}/{size} байт")
+            except socket.error as e:
+                raise ConnectionError(f"Ошибка сокета при получении файла: {e}")
     
     def _receive_string(self, client_socket):
         """
@@ -108,9 +134,9 @@ class ImageServer:
             # Отключаем алгоритм Нейгла для немедленной отправки данных
             client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             # Увеличиваем размер приемного буфера для повышения производительности
-            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1048576)  # 1 MB
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)  # 4 MB
             # Увеличиваем размер отправного буфера
-            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1048576)  # 1 MB
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)  # 4 MB
             
             self.logger.info(f"Подключен клиент: {client_address}")
             
@@ -131,19 +157,17 @@ class ImageServer:
             # Получаем имя файла
             filename = self._receive_string(client_socket)
             self.logger.debug(f"Имя файла: {filename}")
-            
-            # Получаем само изображение
-            image_data = self._receive_data(client_socket, image_size)
-            
+
             # Сохраняем изображение в папку клиента
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             save_filename = f"{timestamp}_{filename}"
             save_path = os.path.join(client_dir, save_filename)
-            
-            with open(save_path, 'wb') as f:
-                f.write(image_data)
-            
-            self.logger.info(f"Изображение сохранено: {save_path} ({len(image_data)} байт)")
+
+            # Пишем файл потоково — быстрее и без лишней памяти/копирования
+            with open(save_path, 'wb', buffering=4 * 1024 * 1024) as f:
+                self._receive_to_file(client_socket, f, image_size)
+
+            self.logger.info(f"Изображение сохранено: {save_path} ({image_size} байт)")
             
             # Отправляем подтверждение клиенту
             client_socket.sendall(b'OK')
@@ -168,7 +192,7 @@ class ImageServer:
         
         try:
             # Увеличиваем размер приемного буфера на серверном сокете
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1048576)  # 1 MB
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)  # 4 MB
             # Увеличиваем размер очереди подключений
             self.server_socket.bind((self.ip, self.port))
             self.server_socket.listen(10)  # Увеличено с 5 до 10
