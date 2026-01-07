@@ -197,7 +197,7 @@ def analyze_station_worker(args: tuple) -> dict:
     }
 
 
-def analyze_station(station_name: str, logs_dir: Path = Path("logs"), max_workers: int = None, 
+def analyze_station(station_name: str, logs_dir: Path = Path("/root/lorett/GroundLinkMonitorServer/logs"), max_workers: int = None, 
                    use_multiprocessing: bool = False, measure_time: bool = True,
                    start_date: str = None, end_date: str = None):
     """Анализирует пролеты указанной станции с использованием параллельной обработки."""
@@ -397,13 +397,13 @@ def main():
     elif len(sys.argv) >= 2:
         # Формат: python simple_analyze.py <станция> (используется logs по умолчанию)
         station_name = sys.argv[1]
-        logs_dir = Path("logs")
+        logs_dir = Path("/root/lorett/GroundLinkMonitorServer/logs")
         start_date = None
         end_date = None
     else:
         # Интерактивный режим
         station_name = None
-        logs_dir = Path("logs")
+        logs_dir = Path("/root/lorett/GroundLinkMonitorServer/logs")
         
         # Интерактивный ввод дат
         print("\n" + "=" * 60)

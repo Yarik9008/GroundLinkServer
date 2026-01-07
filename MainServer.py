@@ -13,7 +13,7 @@ from Logger import Logger
 class ImageServer:
     """Класс сервера для приема изображений от клиентов"""
     
-    def __init__(self, ip="130.49.146.15", port=8888, images_dir="received_images", log_level="info"):
+    def __init__(self, ip="130.49.146.15", port=8888, images_dir="/root/lorett/GroundLinkMonitorServer/received_images", log_level="info"):
         """
         Инициализация сервера
         
@@ -30,12 +30,13 @@ class ImageServer:
         self.running = False
         
         # Создаем директорию для логов
-        os.makedirs('logs', exist_ok=True)
+        logs_dir = "/root/lorett/GroundLinkMonitorServer/logs"
+        os.makedirs(logs_dir, exist_ok=True)
         
         # Инициализация логгера
         logger_config = {
             'log_level': log_level,
-            'path_log': 'logs/image_server_'
+            'path_log': '/root/lorett/GroundLinkMonitorServer/logs/image_server_'
         }
         self.logger = Logger(logger_config)
         

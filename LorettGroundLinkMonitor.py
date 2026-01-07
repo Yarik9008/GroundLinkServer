@@ -48,11 +48,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Настройка логирования с использованием Logger.py
 if LOGGER_AVAILABLE:
     # Создаем директорию для логов
-    os.makedirs('logs', exist_ok=True)
+    logs_dir = "/root/lorett/GroundLinkMonitorServer/logs"
+    os.makedirs(logs_dir, exist_ok=True)
     
     logger_config = {
         'log_level': 'info',
-        'path_log': 'logs/lorett_monitor_'
+        'path_log': '/root/lorett/GroundLinkMonitorServer/logs/lorett_monitor_'
     }
     _logger_instance = Logger(logger_config)
     
@@ -94,12 +95,14 @@ if LOGGER_AVAILABLE:
     logger = LoggerWrapper(_logger_instance)
 else:
     # Fallback на стандартное логирование если Logger.py недоступен
+    logs_dir = "/root/lorett/GroundLinkMonitorServer/logs"
+    os.makedirs(logs_dir, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler('lorett_monitor.log', encoding='utf-8')
+            logging.FileHandler('/root/lorett/GroundLinkMonitorServer/lorett_monitor.log', encoding='utf-8')
         ]
     )
     logger = logging.getLogger(__name__)
@@ -158,7 +161,7 @@ def _validate_constants(constants: Dict[str, Any]) -> Dict[str, Any]:
 def _load_constants() -> Dict[str, Any]:
     """Загружает и валидирует константы из config.json или использует значения по умолчанию."""
     try:
-        config_path = Path('config.json')
+        config_path = Path('/root/lorett/GroundLinkMonitorServer/config.json')
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
@@ -407,7 +410,7 @@ def _compute_overall_unsuccessful_for_date(
     Сначала пытается читать ранее сохраненные avg_snr_*.txt, иначе считает по логам.
     """
     year, month, date_str, _ = get_date_paths(date_yyyymmdd)
-    base_logs_dir = Path("logs") / year / month / date_str
+    base_logs_dir = Path("/root/lorett/GroundLinkMonitorServer/logs") / year / month / date_str
     if not base_logs_dir.exists():
         return 0, 0
 
@@ -1210,7 +1213,7 @@ def load_config() -> Tuple[Dict[str, str], List[str], List[str], List[str], Dict
         ValueError: Если файл содержит невалидный JSON или некорректную структуру
         RuntimeError: При других ошибках загрузки конфигурации
     """
-    config_path = Path('config.json')
+    config_path = Path('/root/lorett/GroundLinkMonitorServer/config.json')
     
     if not config_path.exists():
         raise FileNotFoundError(f"Конфигурационный файл {config_path} не найден")
@@ -1596,7 +1599,7 @@ def download_logs_for_date(target_date: str) -> None:
     
     # Создаем папку для логов в формате logs\YYYY\MM\YYYYMMDD
     year, month, date_str, _ = get_date_paths(target_date)
-    logs_dir = Path('logs') / year / month / date_str
+    logs_dir = Path('/root/lorett/GroundLinkMonitorServer/logs') / year / month / date_str
     logs_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"{Fore.CYAN + Style.BRIGHT}\nСКАЧИВАНИЕ")
@@ -2090,7 +2093,7 @@ def analyze_downloaded_logs(target_date: str) -> None:
     """
     # Используем папку для логов в формате logs\YYYY\MM\YYYYMMDD
     year, month, date_str, _ = get_date_paths(target_date)
-    logs_dir = Path("logs")
+    logs_dir = Path("/root/lorett/GroundLinkMonitorServer/logs")
     base_logs_dir = logs_dir / year / month / date_str
     
     if not base_logs_dir.exists():
@@ -2104,7 +2107,7 @@ def analyze_downloaded_logs(target_date: str) -> None:
     # Загружаем конфигурацию для получения типов диапазонов
     try:
         stations, station_bend_map = load_stations_from_config_for_analysis()
-        config_path = Path('config.json')
+        config_path = Path('/root/lorett/GroundLinkMonitorServer/config.json')
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
@@ -2284,7 +2287,7 @@ def analyze_downloaded_logs(target_date: str) -> None:
         # Создаем папку для графиков в формате report\YYYY\MM\DD.MM.YYYY
         # ВАЖНО: не удаляем существующую директорию, чтобы не скачивать уже сохраненные графики повторно.
         year, month, _, date_folder = get_date_paths(target_date)
-        graphs_dir = Path('report') / year / month / date_folder
+        graphs_dir = Path('/root/lorett/GroundLinkMonitorServer/report') / year / month / date_folder
         try:
             graphs_dir.mkdir(parents=True, exist_ok=True)
         except (PermissionError, OSError) as e:
@@ -2401,7 +2404,7 @@ def analyze_downloaded_logs(target_date: str) -> None:
         
 
 # Загружает конфигурацию станций и создает словари: станция->тип и станция->диапазон (bend)
-def load_stations_from_config_for_analysis(config_path: Path = Path("config.json")) -> Tuple[dict, dict]:
+def load_stations_from_config_for_analysis(config_path: Path = Path("/root/lorett/GroundLinkMonitorServer/config.json")) -> Tuple[dict, dict]:
     """
     Загружает список станций из config.json и создает словарь соответствия станция -> bend тип.
     Используется для анализа SNR.
