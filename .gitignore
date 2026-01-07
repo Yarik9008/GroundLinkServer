@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Logs
+*.log
+logs/
+lorett_monitor.log
+
+# Reports and graphs
+report/
+*.png
+report/**/*.md
+
+# Configuration (contains sensitive data)
+config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Systemd service (system-specific)
+*.service

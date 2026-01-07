@@ -1,0 +1,63 @@
+{
+  "base_urls": {
+    "oper": "https://eus.lorett.org/eus",
+    "reg": "http://eus.lorett.org/eus",
+    "frames": "http://eus.lorett.org/eus"
+  },
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  },
+  "constants": {
+    "min_log_file_size": 100,
+    "min_avg_snr_threshold": 4.0,
+    "x_bend_failure_threshold": 7.0,
+    "l_bend_failure_threshold": 0.0,
+    "request_timeout": 30,
+    "max_concurrent_downloads": 10,
+    "graph_viewport_width": 620,
+    "graph_viewport_height": 640,
+    "graph_display_width": 500,
+    "graph_load_delay": 0.5,
+    "graph_scroll_x": 0,
+    "graph_scroll_y": 30
+  },
+  "satellites": {
+    "L": [
+      "METEOR-M2 3",
+      "METEOR-M2 4",
+      "METOP-B",
+      "METOP-C"
+    ],
+    "X": [
+      "AQUA",
+      "FENGYUN 3D",
+      "FENGYUN 3E",
+      "FENGYUN 3F",
+      "FENGYUN 3G",
+      "NOAA 20 (JPSS-1)",
+      "NOAA 21 (JPSS-2)",
+      "SUOMI NPP"
+    ]
+  },
+  "stations": [
+    {
+      "name": "PlanumMoscow",
+      "type": "reg",
+      "bend": "L"
+    },
+    {
+      "name": "R2.0S_Moscow",
+      "type": "oper",
+      "bend": "X"
+    }
+  ],
+  "email": {
+    "enabled": true,
+    "smtp_server": "smtp.yandex.ru",
+    "smtp_port": 465,
+    "sender_email": "your-email@yandex.ru",
+    "sender_password": "your-app-password",
+    "recipient_email": "recipient@example.com",
+    "cc": []
+  }
+}
