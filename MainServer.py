@@ -9,8 +9,9 @@ import os
 from datetime import datetime
 from Logger import Logger
 
-# Размер чанка для передачи данных (64 KB) - должен совпадать с размером на клиенте
-CHUNK_SIZE = 65536
+# Размер чанка для передачи данных (256 KB) - должен совпадать с размером на клиенте
+# Увеличенный размер чанка повышает производительность передачи
+CHUNK_SIZE = 262144  # 256 KB
 
 
 class ImageServer:
@@ -106,6 +107,10 @@ class ImageServer:
             client_socket.settimeout(60.0)  # 60 секунд на операцию
             # Отключаем алгоритм Нейгла для немедленной отправки данных
             client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # Увеличиваем размер приемного буфера для повышения производительности
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1048576)  # 1 MB
+            # Увеличиваем размер отправного буфера
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1048576)  # 1 MB
             
             self.logger.info(f"Подключен клиент: {client_address}")
             
@@ -162,8 +167,11 @@ class ImageServer:
         self.server_socket.settimeout(1.0)
         
         try:
+            # Увеличиваем размер приемного буфера на серверном сокете
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1048576)  # 1 MB
+            # Увеличиваем размер очереди подключений
             self.server_socket.bind((self.ip, self.port))
-            self.server_socket.listen(5)
+            self.server_socket.listen(10)  # Увеличено с 5 до 10
             self.running = True
             
             self.logger.info(f"Сервер запущен на {self.ip}:{self.port}")
