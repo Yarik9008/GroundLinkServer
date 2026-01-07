@@ -17,7 +17,6 @@ CHUNK_SIZE = 1024 * 1024  # 1 MB
 # Заголовок (имя клиента/размер/имя файла) должен приходить быстро,
 # а сам файл может идти долго, особенно по медленному каналу.
 HEADER_TIMEOUT = 30.0
-FILE_TRANSFER_TIMEOUT = 600.0  # 10 минут "тишины" на recv до обрыва
 
 
 class ImageServer:
@@ -170,9 +169,8 @@ class ImageServer:
             save_path = os.path.join(client_dir, save_filename)
 
             # Пишем файл потоково — быстрее и без лишней памяти/копирования
-            # Увеличиваем таймаут на саму передачу файла: он применяется как
-            # "максимальная пауза без данных" для recv(), а не как общий таймер.
-            client_socket.settimeout(FILE_TRANSFER_TIMEOUT)
+            # Убираем таймаут на передачу изображения: recv() может ждать сколько угодно.
+            client_socket.settimeout(None)
             with open(save_path, 'wb', buffering=4 * 1024 * 1024) as f:
                 self._receive_to_file(client_socket, f, image_size)
 
