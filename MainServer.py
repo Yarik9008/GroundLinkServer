@@ -21,8 +21,8 @@ from typing import Dict
 
 from Logger import Logger
 
-# Размер чанка для передачи данных (1 MB) - должен совпадать с размером на клиенте
-CHUNK_SIZE = 1024 * 1024  # 1 MB
+# Размер чанка для передачи данных (4 MB) - должен совпадать с размером на клиенте
+CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
 
 # Буферы сокета (помогает на высоких скоростях / больших файлах)
 SOCKET_BUF = 8 * 1024 * 1024  # 8 MB
@@ -63,11 +63,16 @@ def _safe_filename(name: str) -> str:
 async def _receive_to_file(reader: asyncio.StreamReader, file_obj, size: int) -> None:
     remaining = size
     while remaining > 0:
-        chunk = await reader.read(min(CHUNK_SIZE, remaining))
-        if not chunk:
+        n = min(CHUNK_SIZE, remaining)
+        try:
+            chunk = await reader.readexactly(n)
+        except asyncio.IncompleteReadError as e:
+            if e.partial:
+                file_obj.write(e.partial)
+                remaining -= len(e.partial)
             raise ConnectionError("Соединение разорвано: клиент отключился")
         file_obj.write(chunk)
-        remaining -= len(chunk)
+        remaining -= n
 
 
 class ImageServer:
@@ -218,6 +223,7 @@ class ImageServer:
             host=self.ip,
             port=self.port,
             backlog=socket.SOMAXCONN,
+            limit=CHUNK_SIZE * 2,
         )
 
         # Настраиваем listening socket (recvbuf)
