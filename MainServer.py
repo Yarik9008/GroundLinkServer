@@ -151,6 +151,7 @@ class ImageServer:
                     existing = 0
 
                 # Сообщаем клиенту оффсет, с которого продолжать
+                self.logger.info(f"Resume: upload_id={upload_id} offset={existing}/{file_size}")
                 _write_u64(writer, existing)
                 await writer.drain()
 
