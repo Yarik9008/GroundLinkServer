@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 """
-Простой SFTP‑сервер на Paramiko.
+Минимальный пример Paramiko (SFTP server).
 
-Особенности:
-- Авторизация по логину/паролю (статически заданы в коде).
-- Автогенерация host key, если он отсутствует.
-- Хранилище файлов в локальной папке `sftp_root` (путь можно задать аргументом).
+Источник: репозиторий Paramiko — https://github.com/paramiko/paramiko
 
-Пример запуска:
-    python MainServer.py
+Запуск (без аргументов):
+    python3 MainServer.py
 
-Для подключения клиента можно использовать `MainClient.py` или любой SFTP‑клиент:
-    sftp -P 2222 demo@130.49.146.15
+Файлы сохраняются в локальную папку `sftp_root/`.
 """
 
-import argparse
 import logging
 import os
 import socket
-import threading
 import time
 from pathlib import Path
 
@@ -29,12 +23,16 @@ LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("sftp-server")
 
-# Статически заданные сетевые параметры и учетные данные
-HOST = "130.49.146.15"
+# ===== Статические настройки сервера =====
+# Важно: сервер слушает на всех интерфейсах, а подключаться к нему можно по публичному IP ниже.
+BIND_HOST = "0.0.0.0"
+PUBLIC_HOST = "130.49.146.15"
 PORT = 2222
 USERNAME = "demo"
 PASSWORD = "secret"
-
+HOST_KEY_PATH = Path("sftp_server_rsa.key")
+SFTP_ROOT = Path("sftp_root").resolve()
+# ========================================
 
 def ensure_host_key(path: Path) -> paramiko.PKey:
     """Читает host key с диска или генерирует новый RSA ключ."""
@@ -49,59 +47,34 @@ def ensure_host_key(path: Path) -> paramiko.PKey:
 
 
 class SimpleSSHServer(paramiko.ServerInterface):
-    """Минимальный SSH сервер для SFTP."""
+    """Минимальный SSH сервер для SFTP (password-auth)."""
 
     def __init__(self, allowed_user: str, allowed_password: str):
         super().__init__()
         self.allowed_user = allowed_user
         self.allowed_password = allowed_password
 
-    def check_auth_password(self, username, password):
+    def check_auth_password(self, username: str, password: str) -> int:
         if username == self.allowed_user and password == self.allowed_password:
             return paramiko.AUTH_SUCCESSFUL
         return paramiko.AUTH_FAILED
 
-    def get_allowed_auths(self, username):
+    def get_allowed_auths(self, username: str) -> str:
         return "password"
 
-    def check_channel_request(self, kind, chanid):
+    def check_channel_request(self, kind: str, chanid: int) -> int:
         if kind == "session":
             return paramiko.OPEN_SUCCEEDED
         return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
-    def check_channel_subsystem_request(self, channel, name):
-        return name == "sftp"
-
-
-class LocalSFTPHandle(paramiko.SFTPHandle):
-    """Обертка для работы с локальными файлами."""
-
-    def __init__(self, fileobj):
-        super().__init__()
-        self._file = fileobj
-
-    def read(self, offset, length):
-        self._file.seek(offset)
-        return self._file.read(length)
-
-    def write(self, offset, data):
-        self._file.seek(offset)
-        self._file.write(data)
-        self._file.flush()
-        return len(data)
-
-    def close(self):
-        try:
-            self._file.close()
-        finally:
-            return super().close()
-
-    def stat(self):
-        return paramiko.SFTPAttributes.from_stat(os.fstat(self._file.fileno()))
+    def check_channel_subsystem_request(self, channel: paramiko.Channel, name: str) -> bool:
+        ok = name == "sftp"
+        logger.info("subsystem request: %s -> %s", name, "OK" if ok else "DENY")
+        return ok
 
 
 class SimpleSFTPServer(paramiko.SFTPServerInterface):
-    """Простой SFTP сервер, работающий с локальной директорией root."""
+    """SFTP сервер, работающий в пределах локальной директории root."""
 
     def __init__(self, server, *l, **kw):
         super().__init__(server, *l, **kw)
@@ -109,7 +82,6 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _to_local(self, path: str) -> Path:
-        # Убираем ведущий слэш и нормализуем путь внутри root
         local = (self.root / path.lstrip("/")).resolve()
         if not str(local).startswith(str(self.root)):
             raise paramiko.SFTPServerError(paramiko.SFTP_PERMISSION_DENIED)
@@ -119,10 +91,9 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
         try:
             local = self._to_local(path)
             entries = []
-            for name in os.listdir(local):
-                full_path = local / name
-                attr = paramiko.SFTPAttributes.from_stat(full_path.lstat())
-                attr.filename = name
+            for child in local.iterdir():
+                attr = paramiko.SFTPAttributes.from_stat(child.lstat())
+                attr.filename = child.name
                 entries.append(attr)
             return entries
         except FileNotFoundError:
@@ -132,8 +103,7 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
 
     def stat(self, path):
         try:
-            local = self._to_local(path)
-            return paramiko.SFTPAttributes.from_stat(local.stat())
+            return paramiko.SFTPAttributes.from_stat(self._to_local(path).stat())
         except FileNotFoundError:
             return paramiko.SFTP_NO_SUCH_FILE
         except PermissionError:
@@ -141,8 +111,7 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
 
     def lstat(self, path):
         try:
-            local = self._to_local(path)
-            return paramiko.SFTPAttributes.from_stat(local.lstat())
+            return paramiko.SFTPAttributes.from_stat(self._to_local(path).lstat())
         except FileNotFoundError:
             return paramiko.SFTP_NO_SUCH_FILE
         except PermissionError:
@@ -155,8 +124,14 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
                 local.parent.mkdir(parents=True, exist_ok=True)
 
             mode = self._flags_to_mode(flags)
-            fileobj = open(local, mode)
-            return LocalSFTPHandle(fileobj)
+            f = open(local, mode)
+
+            handle = paramiko.SFTPHandle(flags)
+            handle.filename = str(local)
+            # Paramiko использует readfile/writefile внутри SFTPHandle для операций read/write.
+            handle.readfile = f
+            handle.writefile = f
+            return handle
         except FileNotFoundError:
             return paramiko.SFTP_NO_SUCH_FILE
         except PermissionError:
@@ -201,7 +176,6 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
 
     @staticmethod
     def _flags_to_mode(flags: int) -> str:
-        """Преобразует POSIX‑флаги в режим Python open()."""
         readwrite = bool(flags & os.O_RDWR)
         write_only = bool(flags & os.O_WRONLY)
         append = bool(flags & os.O_APPEND)
@@ -221,76 +195,69 @@ class SimpleSFTPServer(paramiko.SFTPServerInterface):
         return mode
 
 
-def handle_client(client_socket, addr, host_key, root, username, password):
-    logger.info("Новое подключение: %s:%s", *addr)
+def handle_one_connection(
+    client_socket: socket.socket,
+    addr,
+    host_key: paramiko.PKey,
+    server: SimpleSSHServer,
+) -> None:
+    logger.info("Подключение: %s:%s", *addr)
     transport = paramiko.Transport(client_socket)
     transport.add_server_key(host_key)
-    transport.set_subsystem_handler("sftp", paramiko.SFTPServer, SimpleSFTPServer, root=root)
+    # Paramiko 4.x: SFTPServer ожидает sftp_si=<SFTPServerInterface>
+    transport.set_subsystem_handler("sftp", paramiko.SFTPServer, sftp_si=SimpleSFTPServer, root=str(SFTP_ROOT))
 
-    server = SimpleSSHServer(username, password)
     try:
         transport.start_server(server=server)
     except paramiko.SSHException as exc:
-        logger.error("Не удалось запустить SSH сервер: %s", exc)
+        logger.error("Ошибка запуска SSH server: %s", exc)
         return
 
-    # Ждем первого канала (не обязательно использовать)
+    # Держим session-канал открытым, пока жив Transport:
+    # SFTP подсистема будет запущена на этом канале.
+    logger.info("Ожидаем session-канал...")
     channel = transport.accept(20)
     if channel is None:
-        logger.warning("Не удалось получить канал от %s:%s", *addr)
+        logger.warning("Канал не был открыт клиентом (timeout)")
         transport.close()
         return
+    logger.info("Session-канал открыт, ждём SFTP запросы...")
 
-    try:
-        while transport.is_active():
-            if channel.recv_ready():
-                channel.recv(1024)
-            else:
-                time.sleep(0.5)
-    finally:
-        transport.close()
+    while transport.is_active():
+        time.sleep(0.2)
+    transport.close()
 
 
-def run_server(host: str, port: int, root: Path, username: str, password: str, host_key_path: Path):
-    host_key = ensure_host_key(host_key_path)
+def run_server(
+) -> None:
+    SFTP_ROOT.mkdir(parents=True, exist_ok=True)
+    host_key = ensure_host_key(HOST_KEY_PATH)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((host, port))
+    sock.bind((BIND_HOST, PORT))
     sock.listen(100)
 
-    logger.info("SFTP сервер слушает %s:%s, root=%s", host, port, root)
-    logger.info("Логин: %s, пароль: %s", username, password)
+    logger.info("SFTP server слушает %s:%s (подключаться по %s:%s)", BIND_HOST, PORT, PUBLIC_HOST, PORT)
+    logger.info("Логин: %s, пароль: %s", USERNAME, PASSWORD)
+    logger.info("Root: %s", SFTP_ROOT)
 
     try:
         while True:
             client, addr = sock.accept()
-            thread = threading.Thread(
-                target=handle_client,
-                args=(client, addr, host_key, root, username, password),
-                daemon=True,
-            )
-            thread.start()
+            try:
+                server = SimpleSSHServer(USERNAME, PASSWORD)
+                handle_one_connection(client, addr, host_key, server)
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
     except KeyboardInterrupt:
         logger.info("Остановка сервера по Ctrl+C")
     finally:
         sock.close()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Простой SFTP сервер на Paramiko")
-    parser.add_argument("--root", default="sftp_root", help="Каталог, в котором храним файлы")
-    parser.add_argument("--host-key", default="sftp_server_rsa.key", help="Путь к host key (RSA)")
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
-    run_server(
-        host=HOST,
-        port=PORT,
-        root=Path(args.root),
-        username=USERNAME,
-        password=PASSWORD,
-        host_key_path=Path(args.host_key),
-    )
+    run_server()
