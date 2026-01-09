@@ -2,9 +2,6 @@
 import asyncio
 import os
 from pathlib import Path
-from datetime import datetime
-import inspect
-import time
 
 import asyncssh
 
@@ -23,206 +20,69 @@ SFTP_ROOT = Path("./uploads").resolve()
 BIND_HOST = SERVER_IP  # try "0.0.0.0" for local test if needed
 
 
-def format_bytes(size):
-    """Format bytes to human readable format."""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size < 1024.0:
-            return f"{size:.2f} {unit}"
-        size /= 1024.0
-    return f"{size:.2f} PB"
+class LorettSFTPServer(asyncssh.SSHServer):
+    """Single server class: SSH auth + connection logging.
 
+    SFTP subsystem is provided via sftp_factory (function) below.
+    """
 
-class MySFTPServer(asyncssh.SFTPServer):
-    """Custom SFTP server that restricts access to SFTP_ROOT directory with logging."""
-    
-    def __init__(self, conn):
-        # Set root directory before calling parent __init__
-        # This way asyncssh will automatically restrict all operations to this root
-        root = str(SFTP_ROOT)
-        super().__init__(conn, chroot=root)
-        self._active_uploads = {}
-    
-    def format_user(self, uid):
-        return str(uid)
-    
-    def format_group(self, gid):
-        return str(gid)
-    
-    async def open(self, path, pflags, attrs):
-        """Override open to log file operations."""
-        # Check if this is a write operation
-        is_write = bool(pflags & asyncssh.FXF_WRITE)
-        
-        if is_write:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"[server] [{timestamp}] Receiving file: {path}")
-            self._active_uploads[path] = {
-                'start_time': datetime.now(),
-                'path': path
-            }
-        
-        total_size = None
-        try:
-            if attrs is not None and getattr(attrs, "size", None) is not None:
-                total_size = int(attrs.size)
-        except Exception:
-            total_size = None
-
-        # Call parent open method (sync/async compatible)
-        result = super().open(path, pflags, attrs)
-        if inspect.isawaitable(result):
-            result = await result
-
-        # Wrap writes with lightweight progress logging (throttled)
-        if is_write:
-            result = _ProgressFile(
-                inner=result,
-                path=path,
-                total_size=total_size,
-            )
-        return result
-    
-    async def close(self, file_obj):
-        """Override close to log completion."""
-        # Get file path from the file object
-        if hasattr(file_obj, '_filename'):
-            path = file_obj._filename
-            if path in self._active_uploads:
-                upload_info = self._active_uploads.pop(path)
-                elapsed = (datetime.now() - upload_info['start_time']).total_seconds()
-                
-                # Get file size
-                try:
-                    full_path = SFTP_ROOT / path.lstrip('/')
-                    if full_path.exists():
-                        size = full_path.stat().st_size
-                        speed = size / elapsed if elapsed > 0 else 0
-                        timestamp = datetime.now().strftime("%H:%M:%S")
-                        print(f"[server] [{timestamp}] ✓ Completed: {path} ({format_bytes(size)}) "
-                              f"in {elapsed:.2f}s ({format_bytes(speed)}/s)")
-                except Exception:
-                    pass
-        
-        # Call parent close method (sync/async compatible)
-        result = super().close(file_obj)
-        if inspect.isawaitable(result):
-            result = await result
-        return result
-
-
-class _ProgressFile:
-    """Wrap a server-side SFTP file object and log write progress (throttled)."""
-
-    def __init__(self, inner, path: str, total_size: int | None):
-        self._inner = inner
-        self._path = path
-        self._total_size = total_size
-        self._written = 0
-        self._last_log = time.monotonic()
-
-        # Preserve filename attribute used by our close() logging (best-effort)
-        if not hasattr(self, "_filename"):
-            self._filename = path
-
-    def __getattr__(self, item):
-        return getattr(self._inner, item)
-
-    async def write(self, data):
-        # Delegate write (sync/async compatible)
-        res = self._inner.write(data)
-        if inspect.isawaitable(res):
-            res = await res
-
-        try:
-            self._written += len(data)
-        except Exception:
-            pass
-
-        now = time.monotonic()
-        if now - self._last_log >= 1.0:
-            self._last_log = now
-            if self._total_size:
-                pct = (self._written / self._total_size) * 100
-                print(f"[server] progress {self._path}: {pct:5.1f}% ({format_bytes(self._written)}/{format_bytes(self._total_size)})")
-            else:
-                print(f"[server] progress {self._path}: {format_bytes(self._written)}")
-        return res
-
-    def close(self):
-        """Close file.
-
-        asyncssh expects a synchronous close() (it calls file_obj.close()).
-        If the underlying close() is awaitable, schedule it in the background.
-        """
-        res = self._inner.close()
-        if inspect.isawaitable(res):
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(res)
-            except RuntimeError:
-                # No running loop; best effort: ignore to avoid RuntimeWarning
-                pass
-            return None
-        return res
-
-
-class MySSHServer(asyncssh.SSHServer):
-    """SSH server with password authentication."""
-    
     def connection_made(self, conn):
-        print(f"[server] Connection from {conn.get_extra_info('peername')}")
-    
+        peer = conn.get_extra_info("peername")
+        print(f"[server] Connection from {peer}")
+
     def connection_lost(self, exc):
         if exc:
             print(f"[server] Connection error: {exc}")
-    
+
     def password_auth_supported(self):
         return True
-    
+
     def validate_password(self, username, password):
-        if username == USERNAME and password == PASSWORD:
-            return True
-        return False
+        return username == USERNAME and password == PASSWORD
+
+
+def _ensure_host_key(path: Path) -> None:
+    if path.exists():
+        return
+    print("[server] Generating host key...")
+    key = asyncssh.generate_private_key("ssh-rsa", key_size=2048)
+    path.write_text(key.export_private_key().decode())
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
+def _sftp_factory(conn):
+    # Use built-in SFTP server, restricted to SFTP_ROOT
+    return asyncssh.SFTPServer(conn, chroot=str(SFTP_ROOT))
 
 
 async def start_server():
-    """Start the SFTP server."""
-    # Ensure upload directory exists
     SFTP_ROOT.mkdir(parents=True, exist_ok=True)
-    
-    # Generate or load host keys
+
     host_key_path = Path("ssh_host_rsa_key")
-    if not host_key_path.exists():
-        print("[server] Generating host key...")
-        key = asyncssh.generate_private_key('ssh-rsa', key_size=2048)
-        host_key_path.write_text(key.export_private_key().decode())
-    
+    _ensure_host_key(host_key_path)
+
     print(f"[server] SFTP ROOT: {SFTP_ROOT}")
     print(f"[server] Static config IP/PORT: {SERVER_IP}:{SERVER_PORT}")
     print(f"[server] Binding on: {BIND_HOST}:{SERVER_PORT}")
     print(f"[server] Credentials: {USERNAME} / {PASSWORD}")
-    
-    # Create server with custom SFTP handler
+
     await asyncssh.create_server(
-        MySSHServer,
+        LorettSFTPServer,
         BIND_HOST,
         SERVER_PORT,
         server_host_keys=[str(host_key_path)],
-        sftp_factory=MySFTPServer,
+        sftp_factory=_sftp_factory,
     )
-    
+
     print("[server] Server started, listening for connections...")
 
 
 async def main():
-    """Main server loop."""
     await start_server()
-    
-    # Keep server running
-    try:
-        await asyncio.Event().wait()
-    except KeyboardInterrupt:
-        print("\n[server] Shutting down...")
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
