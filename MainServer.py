@@ -30,6 +30,14 @@ ENCRYPTION_ALGS = [
     "aes256-ctr",
 ]
 
+# SSH channel flow-control tuning (must match client intent, but is negotiated).
+SSH_WINDOW = 1024 * 1024 * 1024   # 1 GiB
+SSH_MAX_PKTSIZE = 8 * 1024 * 1024 # 8 MiB
+
+# TCP socket tuning on accepted connections (best-effort).
+TCP_SNDBUF = 256 * 1024 * 1024    # 256 MiB
+TCP_RCVBUF = 256 * 1024 * 1024    # 256 MiB
+
 # Where to store uploads on the server machine:
 SFTP_ROOT = Path("./uploads").resolve()
 
@@ -47,6 +55,20 @@ class LorettSFTPServer(asyncssh.SSHServer):
     def connection_made(self, conn):
         peer = conn.get_extra_info("peername")
         print(f"[server] Connection from {peer}")
+        # Best-effort TCP tuning (ignore if not available on this platform/transport)
+        sock = conn.get_extra_info("socket")
+        if sock is not None:
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, TCP_SNDBUF)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, TCP_RCVBUF)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                if hasattr(socket, "TCP_QUICKACK"):
+                    try:
+                        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+                    except OSError:
+                        pass
+            except OSError:
+                pass
 
     def connection_lost(self, exc):
         if exc:
@@ -219,6 +241,8 @@ async def start_server():
             rekey_bytes=REKEY_BYTES,
             compression_algs=COMPRESSION_ALGS,
             encryption_algs=ENCRYPTION_ALGS,
+            window=SSH_WINDOW,
+            max_pktsize=SSH_MAX_PKTSIZE,
         )
     except OSError as e:
         # In case something raced us and grabbed the port again
@@ -234,6 +258,8 @@ async def start_server():
                 rekey_bytes=REKEY_BYTES,
                 compression_algs=COMPRESSION_ALGS,
                 encryption_algs=ENCRYPTION_ALGS,
+                window=SSH_WINDOW,
+                max_pktsize=SSH_MAX_PKTSIZE,
             )
         raise
 
