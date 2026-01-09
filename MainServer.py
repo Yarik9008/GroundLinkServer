@@ -11,6 +11,10 @@ USERNAME = "sftpuser"
 PASSWORD = "sftppass123"
 # ===========================================
 
+# Публичный ключ клиента (для passwordless логина).
+# Можно оставить как есть или заменить на свой ключ (ssh-ed25519 ...).
+CLIENT_PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEt0Tp28uwuL7AEKaggEd3D8TD8ZE2Grlk5OqjU8FqSL lorett-sftp"
+
 SFTP_ROOT = Path("./sftp_root").resolve()  # chroot
 UPLOAD_DIR = SFTP_ROOT / "uploads"         # внутри chroot: /uploads
 
@@ -106,6 +110,10 @@ def install_authorized_key_if_present() -> None:
         pubkey_path = Path("./client_ed25519.pub").resolve()
         if pubkey_path.exists():
             key_text = pubkey_path.read_text(encoding="utf-8").strip()
+
+    # 4) Константа в коде (самый простой вариант для фиксированного клиента)
+    if not key_text:
+        key_text = CLIENT_PUBKEY.strip()
 
     AUTHORIZED_KEYS_DIR.mkdir(parents=True, exist_ok=True)
     if not key_text:
