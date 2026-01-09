@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
+import asyncio
 import os
-import socket
-import threading
-import traceback
+import sys
+from pathlib import Path
 
-import paramiko
-from paramiko import AUTH_SUCCESSFUL
-from paramiko.sftp_server import SFTPServerInterface, SFTPAttributes, SFTPHandle
+import asyncssh
 
 # ====== Static config (as requested) ======
 SERVER_IP = "130.49.146.15"
@@ -16,249 +14,192 @@ PASSWORD = "sftppass123"
 # =========================================
 
 # Where to store uploads on the server machine:
-SFTP_ROOT = os.path.abspath("./uploads")
+SFTP_ROOT = Path("./uploads").resolve()
 
 # If your machine does NOT own SERVER_IP, bind will fail.
 # Keep SERVER_IP static above; you can change only this bind host for local testing.
 BIND_HOST = SERVER_IP  # try "0.0.0.0" for local test if needed
 
 
-def ensure_dirs():
-    os.makedirs(SFTP_ROOT, exist_ok=True)
-
-
-def load_or_create_host_key(path="host_rsa.key", bits=2048):
-    if os.path.exists(path):
-        return paramiko.RSAKey.from_private_key_file(path)
-    key = paramiko.RSAKey.generate(bits)
-    key.write_private_key_file(path)
-    return key
-
-
-def _to_local_path(sftp_path: str) -> str:
+class SimpleSFTPServer(asyncssh.SFTPServer):
     """
-    Convert SFTP path like '/a/b.txt' to local path under SFTP_ROOT safely.
+    Minimal async SFTP server mapping all operations into SFTP_ROOT directory.
     """
-    if not sftp_path:
-        sftp_path = "."
-    # normalize and prevent path traversal
-    rel = os.path.normpath(sftp_path).lstrip("/\\")
-    local = os.path.abspath(os.path.join(SFTP_ROOT, rel))
-    if not local.startswith(SFTP_ROOT):
-        raise PermissionError("Path traversal is not allowed")
-    return local
+    
+    def _to_local_path(self, path: str) -> Path:
+        """Convert SFTP path like '/a/b.txt' to local path under SFTP_ROOT safely."""
+        if not path:
+            path = "."
+        # normalize and prevent path traversal
+        rel = os.path.normpath(path).lstrip("/\\")
+        local = (SFTP_ROOT / rel).resolve()
+        if not str(local).startswith(str(SFTP_ROOT)):
+            raise PermissionError("Path traversal is not allowed")
+        return local
 
-
-class SimpleSFTPHandle(SFTPHandle):
-    def __init__(self, flags, filename, fobj):
-        super().__init__(flags)
-        self.filename = filename
-        self.readfile = fobj
-        self.writefile = fobj
-
-
-class SimpleSFTPServer(SFTPServerInterface):
-    """
-    Minimal SFTP server mapping all operations into SFTP_ROOT directory.
-    Supports: listdir, stat/lstat, open (read/write), mkdir, rmdir, remove, rename.
-    """
-
-    def list_folder(self, path):
-        local = _to_local_path(path)
-        out = []
-        for name in os.listdir(local):
-            p = os.path.join(local, name)
-            attr = SFTPAttributes.from_stat(os.stat(p))
-            attr.filename = name
-            out.append(attr)
-        return out
-
-    def stat(self, path):
-        local = _to_local_path(path)
-        return SFTPAttributes.from_stat(os.stat(local))
+    def listdir(self, path):
+        """List directory contents."""
+        try:
+            local = self._to_local_path(path)
+            return [item.name for item in local.iterdir()]
+        except FileNotFoundError:
+            raise asyncssh.SFTPNoSuchFile(f"No such file: {path}")
+        except PermissionError:
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
 
     def lstat(self, path):
-        local = _to_local_path(path)
-        return SFTPAttributes.from_stat(os.lstat(local))
-
-    def open(self, path, flags, attr):
-        local = _to_local_path(path)
-        parent = os.path.dirname(local)
-        os.makedirs(parent, exist_ok=True)
-
-        # Convert POSIX open flags to Python mode
-        # This is a simple mapping that works for typical uploads (write/create/truncate).
-        import errno
-
+        """Get file attributes without following symlinks."""
         try:
-            if flags & os.O_WRONLY:
-                mode = "wb"
-            elif flags & os.O_RDWR:
+            local = self._to_local_path(path)
+            stat_result = local.lstat()
+            return asyncssh.SFTPAttrs.from_local(stat_result)
+        except FileNotFoundError:
+            raise asyncssh.SFTPNoSuchFile(f"No such file: {path}")
+        except PermissionError:
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
+
+    def stat(self, path):
+        """Get file attributes."""
+        try:
+            local = self._to_local_path(path)
+            stat_result = local.stat()
+            return asyncssh.SFTPAttrs.from_local(stat_result)
+        except FileNotFoundError:
+            raise asyncssh.SFTPNoSuchFile(f"No such file: {path}")
+        except PermissionError:
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
+
+    def open(self, path, pflags, attrs):
+        """Open a file."""
+        try:
+            local = self._to_local_path(path)
+            local.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Convert SFTP flags to Python mode
+            mode = ""
+            if pflags & asyncssh.FXF_READ and pflags & asyncssh.FXF_WRITE:
                 mode = "r+b"
+            elif pflags & asyncssh.FXF_WRITE:
+                mode = "wb"
             else:
                 mode = "rb"
-
-            # create/truncate handling
-            if flags & os.O_TRUNC:
-                mode = "wb"
-            if flags & os.O_APPEND:
+            
+            if pflags & asyncssh.FXF_APPEND:
                 mode = "ab"
-
-            # If file must exist but doesn't
-            if not os.path.exists(local) and not (flags & os.O_CREAT):
-                return errno.ENOENT
-
-            fobj = open(local, mode)
-            return SimpleSFTPHandle(flags, local, fobj)
-        except PermissionError:
-            return errno.EACCES
+            elif pflags & asyncssh.FXF_CREAT and pflags & asyncssh.FXF_EXCL:
+                mode = "xb"
+            
+            return open(local, mode)
         except FileNotFoundError:
-            return errno.ENOENT
-        except Exception:
-            return errno.EIO
+            raise asyncssh.SFTPNoSuchFile(f"No such file: {path}")
+        except FileExistsError:
+            raise asyncssh.SFTPFailure(f"File exists: {path}")
+        except PermissionError:
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
 
     def remove(self, path):
-        import errno
+        """Remove a file."""
         try:
-            os.remove(_to_local_path(path))
-            return paramiko.SFTP_OK
+            local = self._to_local_path(path)
+            local.unlink()
         except FileNotFoundError:
-            return errno.ENOENT
+            raise asyncssh.SFTPNoSuchFile(f"No such file: {path}")
         except PermissionError:
-            return errno.EACCES
-        except Exception:
-            return errno.EIO
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
 
     def rename(self, oldpath, newpath):
-        import errno
+        """Rename a file."""
         try:
-            os.rename(_to_local_path(oldpath), _to_local_path(newpath))
-            return paramiko.SFTP_OK
+            old_local = self._to_local_path(oldpath)
+            new_local = self._to_local_path(newpath)
+            new_local.parent.mkdir(parents=True, exist_ok=True)
+            old_local.rename(new_local)
         except FileNotFoundError:
-            return errno.ENOENT
+            raise asyncssh.SFTPNoSuchFile(f"No such file: {oldpath}")
         except PermissionError:
-            return errno.EACCES
-        except Exception:
-            return errno.EIO
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {oldpath}")
 
-    def mkdir(self, path, attr):
-        import errno
+    def mkdir(self, path, attrs):
+        """Create a directory."""
         try:
-            os.makedirs(_to_local_path(path), exist_ok=True)
-            return paramiko.SFTP_OK
+            local = self._to_local_path(path)
+            local.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            return errno.EACCES
-        except Exception:
-            return errno.EIO
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
 
     def rmdir(self, path):
-        import errno
+        """Remove a directory."""
         try:
-            os.rmdir(_to_local_path(path))
-            return paramiko.SFTP_OK
+            local = self._to_local_path(path)
+            local.rmdir()
         except FileNotFoundError:
-            return errno.ENOENT
+            raise asyncssh.SFTPNoSuchFile(f"No such directory: {path}")
         except OSError:
-            return errno.ENOTEMPTY
+            raise asyncssh.SFTPFailure(f"Directory not empty: {path}")
         except PermissionError:
-            return errno.EACCES
-        except Exception:
-            return errno.EIO
+            raise asyncssh.SFTPPermissionDenied(f"Permission denied: {path}")
 
 
-class SimpleServer(paramiko.ServerInterface):
-    def __init__(self):
-        self.event = threading.Event()
-
-    def check_auth_password(self, username, password):
+class MySSHServer(asyncssh.SSHServer):
+    """SSH server with password authentication."""
+    
+    def connection_made(self, conn):
+        print(f"[server] Connection from {conn.get_extra_info('peername')}")
+    
+    def connection_lost(self, exc):
+        if exc:
+            print(f"[server] Connection error: {exc}")
+    
+    def password_auth_supported(self):
+        return True
+    
+    def validate_password(self, username, password):
         if username == USERNAME and password == PASSWORD:
-            return AUTH_SUCCESSFUL
-        return paramiko.AUTH_FAILED
-
-    def get_allowed_auths(self, username):
-        return "password"
-
-    def check_channel_request(self, kind, chanid):
-        # SFTP uses "session" channel
-        if kind == "session":
-            return paramiko.OPEN_SUCCEEDED
-        return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
-
-    def check_channel_subsystem_request(self, channel, name):
-        # Client requests subsystem "sftp"
-        if name == "sftp":
             return True
         return False
 
 
-def handle_client(client_sock, host_key):
-    transport = paramiko.Transport(client_sock)
-    transport.add_server_key(host_key)
-    server = SimpleServer()
-
-    try:
-        # CRITICAL: Register SFTP subsystem handler BEFORE start_server
-        # so it's ready when client requests "sftp" subsystem
-        transport.set_subsystem_handler(
-            "sftp",
-            paramiko.SFTPServer,
-            sftp_si=SimpleSFTPServer,
-        )
-
-        transport.start_server(server=server)
-
-        chan = transport.accept(20)
-        if chan is None:
-            print("[server] No channel, closing")
-            return
-
-        # Keep connection alive until transport ends
-        while transport.is_active():
-            transport.join(1)
-
-    except (paramiko.SSHException, EOFError, ConnectionResetError) as e:
-        # SSH handshake failed (port scanners, bots, bad clients) - log minimally
-        print(f"[server] SSH handshake failed: {e.__class__.__name__}")
-    except Exception:
-        # Real errors (bugs in our code) - log full traceback
-        print("[server] Unexpected error:")
-        traceback.print_exc()
-    finally:
-        try:
-            transport.close()
-        except Exception:
-            pass
-        try:
-            client_sock.close()
-        except Exception:
-            pass
-
-
-def main():
-    ensure_dirs()
-    host_key = load_or_create_host_key()
-
+async def start_server():
+    """Start the SFTP server."""
+    # Ensure upload directory exists
+    SFTP_ROOT.mkdir(parents=True, exist_ok=True)
+    
+    # Generate or load host keys
+    host_key_path = Path("ssh_host_rsa_key")
+    if not host_key_path.exists():
+        print("[server] Generating host key...")
+        key = asyncssh.generate_private_key('ssh-rsa', key_size=2048)
+        host_key_path.write_text(key.export_private_key().decode())
+    
     print(f"[server] SFTP ROOT: {SFTP_ROOT}")
     print(f"[server] Static config IP/PORT: {SERVER_IP}:{SERVER_PORT}")
     print(f"[server] Binding on: {BIND_HOST}:{SERVER_PORT}")
     print(f"[server] Credentials: {USERNAME} / {PASSWORD}")
+    
+    await asyncssh.create_server(
+        MySSHServer,
+        BIND_HOST,
+        SERVER_PORT,
+        server_host_keys=[str(host_key_path)],
+        sftp_factory=SimpleSFTPServer,
+    )
+    
+    print("[server] Server started, listening for connections...")
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((BIND_HOST, SERVER_PORT))
-    sock.listen(100)
 
-    print("[server] Listening...")
-
+async def main():
+    """Main server loop."""
+    await start_server()
+    
+    # Keep server running
     try:
-        while True:
-            client, addr = sock.accept()
-            print(f"[server] Connection from {addr}")
-            t = threading.Thread(target=handle_client, args=(client, host_key), daemon=True)
-            t.start()
-    finally:
-        sock.close()
+        await asyncio.Event().wait()
+    except KeyboardInterrupt:
+        print("\n[server] Shutting down...")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[server] Server stopped")
