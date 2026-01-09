@@ -215,8 +215,12 @@ def handle_client(client_sock, host_key):
         while transport.is_active():
             transport.join(1)
 
+    except (paramiko.SSHException, EOFError, ConnectionResetError) as e:
+        # SSH handshake failed (port scanners, bots, bad clients) - log minimally
+        print(f"[server] SSH handshake failed: {e.__class__.__name__}")
     except Exception:
-        print("[server] Error:")
+        # Real errors (bugs in our code) - log full traceback
+        print("[server] Unexpected error:")
         traceback.print_exc()
     finally:
         try:
