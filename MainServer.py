@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import asyncio
+import os
+import pwd
+import subprocess
 from pathlib import Path
-
-import asyncssh
 
 # ====== Static config (как вы просили) ======
 SERVER_IP = "130.49.146.15"   # если этот IP не на сервере — поставьте "0.0.0.0"
@@ -11,67 +11,179 @@ USERNAME = "sftpuser"
 PASSWORD = "sftppass123"
 # ===========================================
 
-UPLOAD_DIR = Path("./uploads").resolve()
-HOST_KEY_PATH = Path("./ssh_host_key")  # создастся автоматически, если нет
+SFTP_ROOT = Path("./sftp_root").resolve()  # chroot
+UPLOAD_DIR = SFTP_ROOT / "uploads"         # внутри chroot: /uploads
+
+SSHD_CONFIG_PATH = Path("./sshd_config").resolve()
+PID_FILE = Path("./sshd.pid").resolve()
+
+# Host keys (создадим автоматически, если нет)
+HOST_KEY_ED25519 = Path("./ssh_host_ed25519_key").resolve()
+HOST_KEY_RSA = Path("./ssh_host_rsa_key").resolve()
+
+# Куда sshd будет смотреть authorized_keys (читается ДО chroot)
+AUTHORIZED_KEYS_DIR = Path("/etc/ssh/authorized_keys")
+AUTHORIZED_KEYS_PATH = AUTHORIZED_KEYS_DIR / USERNAME
 
 
-class SimpleSSHServer(asyncssh.SSHServer):
-    """Самый простой сервер: только парольная авторизация."""
-
-    def password_auth_supported(self) -> bool:
-        return True
-
-    def validate_password(self, username: str, password: str) -> bool:
-        return username == USERNAME and password == PASSWORD
+def ensure_root() -> None:
+    if os.geteuid() != 0:
+        raise SystemExit("[server] ERROR: must be run as root (needed for chroot and user management)")
 
 
-def sftp_factory(conn):
-    """
-    Включаем SFTP и "запираем" пользователя в UPLOAD_DIR (chroot).
-    Клиент видит этот каталог как корень "/".
-    """
-    return asyncssh.SFTPServer(conn, chroot=str(UPLOAD_DIR))
+def ensure_user(username: str, password: str) -> None:
+    try:
+        pwd.getpwnam(username)
+        user_exists = True
+    except KeyError:
+        user_exists = False
+
+    if not user_exists:
+        # system user without shell, no home directory needed
+        subprocess.run(
+            ["useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", username],
+            check=True,
+        )
+
+    # set/update password (for PasswordAuthentication yes)
+    subprocess.run(["chpasswd"], input=f"{username}:{password}\n", text=True, check=True)
 
 
-async def main():
+def ensure_dirs() -> None:
+    # chroot dir must be owned by root and not writable by the user
+    SFTP_ROOT.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Генерация host key (если нет)
-    if not HOST_KEY_PATH.exists():
-        key = asyncssh.generate_private_key("ssh-rsa", key_size=2048)
-        HOST_KEY_PATH.write_text(key.export_private_key().decode("utf-8"), encoding="utf-8")
+    sftp_root_stat = SFTP_ROOT.stat()
+    if sftp_root_stat.st_uid != 0:
+        os.chown(SFTP_ROOT, 0, 0)
+    os.chmod(SFTP_ROOT, 0o755)
 
-    server = await asyncssh.create_server(
-        SimpleSSHServer,
-        SERVER_IP,
-        SERVER_PORT,
-        server_host_keys=[str(HOST_KEY_PATH)],
-        sftp_factory=sftp_factory,
+    # uploads directory should be writable by the SFTP user
+    pw = pwd.getpwnam(USERNAME)
+    os.chown(UPLOAD_DIR, pw.pw_uid, pw.pw_gid)
+    os.chmod(UPLOAD_DIR, 0o755)
 
-        # ======= SPEED / CPU tuning =======
-        # Компрессия полностью OFF
-        compression_algs=["none"],
+    # sshd may require this directory
+    Path("/run/sshd").mkdir(parents=True, exist_ok=True)
 
-        # Быстрые шифры (порядок = приоритет)
-        encryption_algs=[
-            "chacha20-poly1305@openssh.com",
-            "aes128-gcm@openssh.com",
-            "aes256-gcm@openssh.com",
-            "aes128-ctr",
-        ],
-        # ==================================
-    )
 
-    print(f"[server] Listening on {SERVER_IP}:{SERVER_PORT}")
-    print(f"[server] Upload dir (chroot): {UPLOAD_DIR}")
-    print(f"[server] Credentials: {USERNAME} / {PASSWORD}")
+def ensure_host_keys() -> None:
+    ssh_keygen = "/usr/bin/ssh-keygen"
+    if not Path(ssh_keygen).exists():
+        raise SystemExit("[server] ERROR: ssh-keygen not found (install openssh-server)")
 
-    await server.wait_closed()
+    if not HOST_KEY_ED25519.exists():
+        subprocess.run([ssh_keygen, "-t", "ed25519", "-f", str(HOST_KEY_ED25519), "-N", ""], check=True)
+        os.chmod(HOST_KEY_ED25519, 0o600)
+
+    if not HOST_KEY_RSA.exists():
+        subprocess.run([ssh_keygen, "-t", "rsa", "-b", "3072", "-f", str(HOST_KEY_RSA), "-N", ""], check=True)
+        os.chmod(HOST_KEY_RSA, 0o600)
+
+
+def install_authorized_key_if_present() -> None:
+    """
+    Если рядом с скриптом лежит ./client_ed25519.pub — установим его как authorized_keys для USERNAME.
+    Это удобно для быстрого старта без ручного копирования.
+    """
+    pubkey_path = Path("./client_ed25519.pub").resolve()
+    if not pubkey_path.exists():
+        return
+
+    AUTHORIZED_KEYS_DIR.mkdir(parents=True, exist_ok=True)
+    key_text = pubkey_path.read_text(encoding="utf-8").strip()
+    if not key_text:
+        return
+
+    existing = ""
+    if AUTHORIZED_KEYS_PATH.exists():
+        existing = AUTHORIZED_KEYS_PATH.read_text(encoding="utf-8")
+
+    if key_text not in existing:
+        with AUTHORIZED_KEYS_PATH.open("a", encoding="utf-8") as f:
+            if existing and not existing.endswith("\n"):
+                f.write("\n")
+            f.write(key_text + "\n")
+
+    os.chown(AUTHORIZED_KEYS_PATH, 0, 0)
+    os.chmod(AUTHORIZED_KEYS_PATH, 0o644)
+
+
+def write_sshd_config() -> None:
+    # OpenSSH uses 'Ciphers' option (not 'encryption_algs')
+    cfg = f"""# Autogenerated by MainServer.py
+Port {SERVER_PORT}
+ListenAddress {SERVER_IP}
+
+Protocol 2
+HostKey {HOST_KEY_ED25519}
+HostKey {HOST_KEY_RSA}
+
+PidFile {PID_FILE}
+
+UsePAM no
+UseDNS no
+PrintMotd no
+PermitRootLogin no
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitEmptyPasswords no
+
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+PermitTunnel no
+
+Compression no
+RekeyLimit 1G 1h
+
+# Prefer fast AEAD ciphers
+Ciphers aes128-gcm@openssh.com,aes256-gcm@openssh.com,chacha20-poly1305@openssh.com,aes128-ctr
+
+Subsystem sftp internal-sftp
+
+# Authorized keys file is read before chroot, so we can keep it outside.
+AuthorizedKeysFile {AUTHORIZED_KEYS_PATH}
+
+Match User {USERNAME}
+    ChrootDirectory {SFTP_ROOT}
+    ForceCommand internal-sftp -d /uploads
+    AllowTcpForwarding no
+    X11Forwarding no
+    PermitTTY no
+"""
+    SSHD_CONFIG_PATH.write_text(cfg, encoding="utf-8")
+
+
+def run_sshd() -> None:
+    sshd = "/usr/sbin/sshd"
+    if not Path(sshd).exists():
+        raise SystemExit("[server] ERROR: sshd not found (install openssh-server)")
+
+    cmd = [sshd, "-D", "-e", "-f", str(SSHD_CONFIG_PATH)]
+    print(f"[server] Starting OpenSSH sshd: {' '.join(cmd)}")
+    print(f"[server] Chroot: {SFTP_ROOT}")
+    print(f"[server] Upload dir inside chroot: /uploads -> {UPLOAD_DIR}")
+    print(f"[server] User: {USERNAME} (password auth enabled)")
+    print(f"[server] If using keys: put public key into {AUTHORIZED_KEYS_PATH}")
+    subprocess.run(cmd, check=True)
+
+
+def main() -> None:
+    ensure_root()
+    ensure_user(USERNAME, PASSWORD)
+    ensure_host_keys()
+    ensure_dirs()
+    install_authorized_key_if_present()
+    write_sshd_config()
+    run_sshd()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
-    except (OSError, asyncssh.Error) as e:
+        main()
+    except (OSError, subprocess.SubprocessError) as e:
         print(f"[server] ERROR: {e}")
         raise
