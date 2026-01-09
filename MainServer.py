@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import os
 from pathlib import Path
 
 import asyncssh
@@ -17,6 +18,22 @@ SFTP_ROOT = Path("./uploads").resolve()
 # If your machine does NOT own SERVER_IP, bind will fail.
 # Keep SERVER_IP static above; you can change only this bind host for local testing.
 BIND_HOST = SERVER_IP  # try "0.0.0.0" for local test if needed
+
+
+class MySFTPServer(asyncssh.SFTPServer):
+    """Custom SFTP server that restricts access to SFTP_ROOT directory."""
+    
+    def __init__(self, conn):
+        # Set root directory before calling parent __init__
+        # This way asyncssh will automatically restrict all operations to this root
+        root = str(SFTP_ROOT)
+        super().__init__(conn, chroot=root)
+    
+    def format_user(self, uid):
+        return str(uid)
+    
+    def format_group(self, gid):
+        return str(gid)
 
 
 class MySSHServer(asyncssh.SSHServer):
@@ -55,15 +72,13 @@ async def start_server():
     print(f"[server] Binding on: {BIND_HOST}:{SERVER_PORT}")
     print(f"[server] Credentials: {USERNAME} / {PASSWORD}")
     
-    # Use asyncssh's built-in SFTP server with chroot to SFTP_ROOT
-    # This ensures full compatibility with both Paramiko and asyncssh clients
+    # Create server with custom SFTP handler
     await asyncssh.create_server(
         MySSHServer,
         BIND_HOST,
         SERVER_PORT,
         server_host_keys=[str(host_key_path)],
-        sftp_factory=True,  # Use built-in SFTP server
-        sftp_chroot=str(SFTP_ROOT),  # Chroot to uploads directory
+        sftp_factory=MySFTPServer,
     )
     
     print("[server] Server started, listening for connections...")
