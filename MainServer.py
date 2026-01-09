@@ -87,12 +87,27 @@ def install_authorized_key_if_present() -> None:
     Если рядом с скриптом лежит ./client_ed25519.pub — установим его как authorized_keys для USERNAME.
     Это удобно для быстрого старта без ручного копирования.
     """
-    pubkey_path = Path("./client_ed25519.pub").resolve()
-    if not pubkey_path.exists():
-        return
+    key_text = ""
+
+    # 1) Через env (удобно для copy/paste одной строкой)
+    key_text_env = os.environ.get("LORETT_SFTP_PUBKEY", "").strip()
+    if key_text_env:
+        key_text = key_text_env
+
+    # 2) Через env путь к файлу
+    pubkey_env_path = os.environ.get("LORETT_SFTP_PUBKEY_PATH", "").strip()
+    if not key_text and pubkey_env_path:
+        p = Path(pubkey_env_path).expanduser().resolve()
+        if p.exists():
+            key_text = p.read_text(encoding="utf-8").strip()
+
+    # 3) Через файл рядом со скриптом
+    if not key_text:
+        pubkey_path = Path("./client_ed25519.pub").resolve()
+        if pubkey_path.exists():
+            key_text = pubkey_path.read_text(encoding="utf-8").strip()
 
     AUTHORIZED_KEYS_DIR.mkdir(parents=True, exist_ok=True)
-    key_text = pubkey_path.read_text(encoding="utf-8").strip()
     if not key_text:
         return
 
