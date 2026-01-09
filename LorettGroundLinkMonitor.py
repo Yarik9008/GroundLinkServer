@@ -1203,24 +1203,52 @@ def load_config() -> Tuple[Dict[str, str], List[str], List[str], List[str], Dict
 
 
 # Синхронно загружает HTML страницу со списком логов для типа станций
-def fetch_logs_page(url: str, st: str, headers: Dict[str, str]) -> str:
+def fetch_logs_page(url: str, st: str, headers: Dict[str, str], max_retries: int = 3) -> str:
     """
     Загружает HTML страницу со списком логов для указанного типа станций.
+    Автоматически повторяет запрос при ошибке 503 (Service Unavailable).
     
     Args:
         url: URL страницы со списком логов
         st: Тип станций ('oper', 'reg', 'frames')
         headers: HTTP заголовки для запроса
+        max_retries: Максимальное количество попыток (по умолчанию 3)
         
     Returns:
         str: HTML содержимое страницы
         
     Raises:
-        requests.RequestException: При ошибках HTTP запроса
+        requests.RequestException: При ошибках HTTP запроса после всех попыток
     """
-    r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, verify=False)
-    r.raise_for_status()
-    return r.text
+    last_error = None
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, verify=False)
+            r.raise_for_status()
+            return r.text
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 503:
+                last_error = e
+                # Экспоненциальная задержка: 2, 4, 8 секунд
+                delay = 2 ** attempt
+                logger.warning(f"Ошибка 503 (Service Unavailable) для '{st}', попытка {attempt}/{max_retries}. Повтор через {delay} сек...")
+                if attempt < max_retries:
+                    time.sleep(delay)
+                    continue
+                logger.error(f"Превышено количество попыток для '{st}' после {max_retries} попыток")
+                raise
+            else:
+                # Другие HTTP ошибки пробрасываем сразу
+                raise
+        except requests.RequestException as e:
+            # Сетевые ошибки (timeout, connection error) - пробрасываем сразу
+            raise
+    
+    # Если дошли сюда, значит все попытки исчерпаны
+    if last_error:
+        raise last_error
+    raise requests.RequestException(f"Не удалось загрузить страницу для '{st}' после {max_retries} попыток")
 
 
 # Парсит HTML и находит все логи для указанной даты, группируя по станциям
@@ -1340,6 +1368,23 @@ async def download_single_log_async(
                     await asyncio.sleep(1)
                     continue
                 return False, last_error, 0
+            except aiohttp.ClientResponseError as e:
+                # Специальная обработка для 503 Service Unavailable
+                if e.status == 503:
+                    delay = 2 ** attempt  # Экспоненциальная задержка: 2, 4, 8 секунд
+                    last_error = f"Ошибка 503 (Service Unavailable)"
+                    logger.warning(f"Попытка {attempt}/{max_retries} загрузки {log_file}: {last_error}. Повтор через {delay} сек...")
+                    if attempt < max_retries:
+                        await asyncio.sleep(delay)
+                        continue
+                    return False, last_error, 0
+                else:
+                    last_error = f"Ошибка HTTP {e.status}: {e.message}"
+                    if attempt < max_retries:
+                        logger.warning(f"Попытка {attempt}/{max_retries} загрузки {log_file}: {last_error}")
+                        await asyncio.sleep(1)
+                        continue
+                    return False, last_error, 0
             except aiohttp.ClientError as e:
                 last_error = f"Ошибка HTTP: {e}"
                 if attempt < max_retries:
@@ -1730,6 +1775,25 @@ def _download_logs_sync(
                         continue
                     break
                     
+            except requests.HTTPError as e:
+                # Специальная обработка для 503 Service Unavailable
+                if e.response is not None and e.response.status_code == 503:
+                    delay = 2 ** attempt  # Экспоненциальная задержка: 2, 4, 8 секунд
+                    last_error = f"Ошибка 503 (Service Unavailable)"
+                    print(f"{Fore.YELLOW}  Попытка {attempt}/{max_retries} не удалась: {last_error}. Повтор через {delay} сек...")
+                    logger.warning(f"Ошибка 503 при загрузке {log_file}, попытка {attempt}/{max_retries}")
+                    if attempt < max_retries:
+                        time.sleep(delay)
+                        continue
+                    break
+                else:
+                    status = e.response.status_code if e.response is not None else "unknown"
+                    last_error = f"Ошибка HTTP {status}: {e}"
+                    if attempt < max_retries:
+                        print(f"{Fore.YELLOW}  Попытка {attempt}/{max_retries} не удалась: {last_error}")
+                        time.sleep(1)
+                        continue
+                    break
             except requests.RequestException as e:
                 last_error = f"Ошибка сети: {e}"
                 if attempt < max_retries:
