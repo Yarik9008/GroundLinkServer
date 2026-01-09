@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import asyncio
+import errno
 import os
 import signal
+import socket
+import time
 from pathlib import Path
 
 import asyncssh
@@ -42,6 +45,124 @@ class LorettSFTPServer(asyncssh.SSHServer):
         return username == USERNAME and password == PASSWORD
 
 
+def _iter_listen_inodes_for_port(port: int) -> set[str]:
+    """Return socket inode strings for LISTEN sockets on TCP port."""
+
+    def parse_proc_net(path: str) -> set[str]:
+        inodes: set[str] = set()
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                # skip header
+                next(f, None)
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
+                    local_addr = parts[1]          # ip:port in hex
+                    state = parts[3]               # 0A == LISTEN
+                    inode = parts[9]
+
+                    if state != "0A":
+                        continue
+                    try:
+                        _ip_hex, port_hex = local_addr.split(":")
+                        if int(port_hex, 16) == port:
+                            inodes.add(inode)
+                    except Exception:
+                        continue
+        except FileNotFoundError:
+            return set()
+        return inodes
+
+    return parse_proc_net("/proc/net/tcp") | parse_proc_net("/proc/net/tcp6")
+
+
+def _pids_listening_on_port(port: int) -> set[int]:
+    """Find PIDs which have LISTEN sockets on given TCP port."""
+    inodes = _iter_listen_inodes_for_port(port)
+    if not inodes:
+        return set()
+
+    target = {f"socket:[{inode}]" for inode in inodes}
+    pids: set[int] = set()
+
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        fd_dir = f"/proc/{pid}/fd"
+        try:
+            for fd in os.listdir(fd_dir):
+                try:
+                    link = os.readlink(os.path.join(fd_dir, fd))
+                except OSError:
+                    continue
+                if link in target:
+                    pids.add(pid)
+                    break
+        except (FileNotFoundError, PermissionError):
+            continue
+
+    return pids
+
+
+def _pid_cmdline(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            raw = f.read().split(b"\x00")
+            parts = [p.decode("utf-8", errors="replace") for p in raw if p]
+            return " ".join(parts) if parts else f"<pid {pid}>"
+    except Exception:
+        return f"<pid {pid}>"
+
+
+def _force_free_tcp_port(port: int) -> None:
+    """If port is occupied, terminate the owning process(es)."""
+    pids = _pids_listening_on_port(port)
+    if not pids:
+        return
+
+    self_pid = os.getpid()
+    pids = {p for p in pids if p != self_pid}
+    if not pids:
+        return
+
+    print(f"[server] Port {port} is busy. Stopping processes: {sorted(pids)}")
+    for pid in sorted(pids):
+        print(f"[server]  - PID {pid}: {_pid_cmdline(pid)}")
+
+    # First try SIGTERM
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            raise PermissionError(f"No permission to stop pid {pid} (need sudo/root?)")
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        still = {pid for pid in pids if os.path.exists(f"/proc/{pid}")}
+        if not still:
+            break
+        time.sleep(0.1)
+
+    # Escalate to SIGKILL if needed
+    still = {pid for pid in pids if os.path.exists(f"/proc/{pid}")}
+    if still:
+        print(f"[server] Forcing stop (SIGKILL): {sorted(still)}")
+        for pid in still:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                raise PermissionError(f"No permission to SIGKILL pid {pid} (need sudo/root?)")
+
+        # brief wait for cleanup
+        time.sleep(0.2)
+
+
 def _ensure_host_key(path: Path) -> None:
     if path.exists():
         return
@@ -65,18 +186,36 @@ async def start_server():
     host_key_path = Path("ssh_host_rsa_key")
     _ensure_host_key(host_key_path)
 
+    # Ensure the port is free before binding (kill any listener if needed).
+    # This is intentionally aggressive as requested.
+    await asyncio.to_thread(_force_free_tcp_port, SERVER_PORT)
+
     print(f"[server] SFTP ROOT: {SFTP_ROOT}")
     print(f"[server] Static config IP/PORT: {SERVER_IP}:{SERVER_PORT}")
     print(f"[server] Binding on: {BIND_HOST}:{SERVER_PORT}")
     print(f"[server] Credentials: {USERNAME} / {PASSWORD}")
 
-    return await asyncssh.create_server(
-        LorettSFTPServer,
-        BIND_HOST,
-        SERVER_PORT,
-        server_host_keys=[str(host_key_path)],
-        sftp_factory=_sftp_factory,
-    )
+    try:
+        return await asyncssh.create_server(
+            LorettSFTPServer,
+            BIND_HOST,
+            SERVER_PORT,
+            server_host_keys=[str(host_key_path)],
+            sftp_factory=_sftp_factory,
+        )
+    except OSError as e:
+        # In case something raced us and grabbed the port again
+        if getattr(e, "errno", None) == errno.EADDRINUSE:
+            print(f"[server] Bind failed: address already in use. Retrying after forced cleanup...")
+            await asyncio.to_thread(_force_free_tcp_port, SERVER_PORT)
+            return await asyncssh.create_server(
+                LorettSFTPServer,
+                BIND_HOST,
+                SERVER_PORT,
+                server_host_keys=[str(host_key_path)],
+                sftp_factory=_sftp_factory,
+            )
+        raise
 
     print("[server] Server started, listening for connections...")
 
