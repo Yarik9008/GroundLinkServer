@@ -16,6 +16,20 @@ USERNAME = "sftpuser"
 PASSWORD = "sftppass123"
 # =========================================
 
+# Performance tuning (large files / high throughput)
+# Avoid frequent SSH rekey during multi-GB transfers.
+REKEY_BYTES = 16 * 1024 * 1024 * 1024  # 16 GiB
+# Disable compression for max throughput (and CPU savings)
+COMPRESSION_ALGS = ["none"]
+# Prefer fast ciphers (hardware AES if available, otherwise ChaCha20)
+ENCRYPTION_ALGS = [
+    "aes128-gcm@openssh.com",
+    "aes256-gcm@openssh.com",
+    "chacha20-poly1305@openssh.com",
+    "aes128-ctr",
+    "aes256-ctr",
+]
+
 # Where to store uploads on the server machine:
 SFTP_ROOT = Path("./uploads").resolve()
 
@@ -202,6 +216,9 @@ async def start_server():
             SERVER_PORT,
             server_host_keys=[str(host_key_path)],
             sftp_factory=_sftp_factory,
+            rekey_bytes=REKEY_BYTES,
+            compression_algs=COMPRESSION_ALGS,
+            encryption_algs=ENCRYPTION_ALGS,
         )
     except OSError as e:
         # In case something raced us and grabbed the port again
@@ -214,6 +231,9 @@ async def start_server():
                 SERVER_PORT,
                 server_host_keys=[str(host_key_path)],
                 sftp_factory=_sftp_factory,
+                rekey_bytes=REKEY_BYTES,
+                compression_algs=COMPRESSION_ALGS,
+                encryption_algs=ENCRYPTION_ALGS,
             )
         raise
 
