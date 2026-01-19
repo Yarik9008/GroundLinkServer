@@ -62,6 +62,11 @@ python3 LorettGroundLinkMonitor.py --stat-all R2.0S_Moscow 20260101 20260110
 python3 LorettGroundLinkMonitor.py --off-email 20260110
 ```
 
+Отправка письма только на debug-адрес из config.json (`email.debug_recipient`):
+```bash
+python3 LorettGroundLinkMonitor.py --debag-email
+```
+
 ## Конфигурация
 Все настройки находятся в `config.json`:
 - станции (`name`, `bend` = `L`/`X`)
@@ -94,6 +99,31 @@ sudo systemctl restart lorett-monitor.service
 ## Логи
 - `lorett_monitor.log`
 - `journalctl` (при запуске через systemd)
+
+## Мониторинг Telegram-канала
+Скрипт `TelegramChannelWatcher.py` отслеживает новые сообщения в канале и печатает их в stdout.
+
+Установите зависимости:
+```bash
+pip install -r requirements.txt
+```
+
+Переменные окружения:
+- `TG_API_ID` и `TG_API_HASH` — данные приложения Telegram
+- `TG_CHANNEL` — username или ID канала
+- `TG_SESSION` — имя/путь сессии (опционально)
+- `TG_BOT_TOKEN` — токен бота (опционально, если используете бота)
+- `TG_OUTPUT` — путь к JSONL файлу (опционально)
+
+Запуск:
+```bash
+TG_API_ID=12345 TG_API_HASH=xxxx TG_CHANNEL=@my_channel python3 TelegramChannelWatcher.py
+```
+
+Запуск с ботом (бот должен быть участником канала):
+```bash
+TG_API_ID=12345 TG_API_HASH=xxxx TG_CHANNEL=@my_channel TG_BOT_TOKEN=123:abc python3 TelegramChannelWatcher.py
+```
 
 ## Лицензия
 MIT

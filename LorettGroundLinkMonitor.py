@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional, Dict, Any
 import asyncio
 import time
-import threading
+import sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -39,6 +39,13 @@ try:
     AIOHTTP_AVAILABLE = True
 except ImportError:
     AIOHTTP_AVAILABLE = False
+
+# Попытка импортировать telethon для отслеживания Telegram
+try:
+    from telethon import TelegramClient  # type: ignore
+    TELETHON_AVAILABLE = True
+except ImportError:
+    TELETHON_AVAILABLE = False
 
 # Константы для прогресс-бара
 PROGRESS_BAR_WIDTH = 30
@@ -64,6 +71,696 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 EMAIL_DISABLED = False
+EMAIL_DEBUG_RECIPIENT: Optional[str] = None
+
+# === Telegram comm passes ===
+TG_API_ID = int(os.getenv("TG_API_ID", "25004944"))
+TG_API_HASH = os.getenv("TG_API_HASH", "3d29770555fbca4b0ea880003ed892bc")
+TG_CHANNEL = os.getenv("TG_CHANNEL", "https://t.me/+Lb1SuoOUlodhYTli")
+TG_SESSION = os.getenv("TG_SESSION", "/root/lorett/GroundLinkMonitorServer/telegram")
+COMM_DB_PATH = os.getenv("COMM_DB_PATH", "/root/lorett/GroundLinkMonitorServer/comm_passes.db")
+ALL_PASSES_DB_PATH = os.getenv("ALL_PASSES_DB_PATH", "/root/lorett/GroundLinkMonitorServer/all_passes.db")
+
+COMM_STATION_ALIASES = {
+    "MUR": "R3.2S_Murmansk",
+    "ANA": "R4.6S_Anadyr",
+}
+
+COMM_PASS_LINE_RE = re.compile(
+    r"^\s*(?P<station>\S+)\s+(?P<satellite>\S+)(?:\s+UTC)?\s+"
+    r"(?P<date>\d{4}[./-]\d{2}[./-]\d{2})\s+"
+    r"(?P<start>\d{2}:\d{2}:\d{2})\s*-\s*"
+    r"(?P<end>\d{2}:\d{2}:\d{2})",
+    re.IGNORECASE,
+)
+
+
+def _all_db_quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _all_db_init(db_path: str) -> sqlite3.Connection:
+    return sqlite3.connect(db_path)
+
+
+def _all_db_ensure_station_table(conn: sqlite3.Connection, station: str) -> None:
+    table_name = _all_db_quote_identifier(station)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY,
+            satellite TEXT NOT NULL,
+            session_start TIMESTAMP NOT NULL,
+            session_end TIMESTAMP NOT NULL,
+            successful TEXT NOT NULL CHECK (successful IN ('Yes', 'No'))
+        )
+        """
+    )
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    cols = {row[1] for row in cursor.fetchall()}
+    if "successful" not in cols:
+        cursor.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN successful TEXT NOT NULL DEFAULT 'Yes'"
+        )
+    conn.commit()
+    cursor.close()
+
+
+def _all_db_upsert_pass(
+    conn: sqlite3.Connection,
+    station: str,
+    satellite: str,
+    session_start: str,
+    session_end: str,
+    successful: str,
+) -> str:
+    _all_db_ensure_station_table(conn, station)
+    table_name = _all_db_quote_identifier(station)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT id, session_end, successful
+        FROM {table_name}
+        WHERE satellite = ?
+          AND session_start = ?
+        LIMIT 1
+        """,
+        (satellite, session_start),
+    )
+    existing = cursor.fetchone()
+    if existing is not None:
+        row_id, current_end, current_success = existing
+        if current_end != session_end or current_success != successful:
+            cursor.execute(
+                f"UPDATE {table_name} SET session_end = ?, successful = ? WHERE id = ?",
+                (session_end, successful, row_id),
+            )
+            conn.commit()
+            logger.info(
+                "all_passes UPDATE station=%s satellite=%s start=%s end=%s successful=%s",
+                station,
+                satellite,
+                session_start,
+                session_end,
+                successful,
+            )
+            cursor.close()
+            return "updated"
+        cursor.close()
+        return "exists"
+    cursor.execute(
+        f"""
+        INSERT INTO {table_name} (satellite, session_start, session_end, successful)
+        VALUES (?, ?, ?, ?)
+        """,
+        (satellite, session_start, session_end, successful),
+    )
+    conn.commit()
+    cursor.close()
+    logger.info(
+        "all_passes INSERT station=%s satellite=%s start=%s end=%s successful=%s",
+        station,
+        satellite,
+        session_start,
+        session_end,
+        successful,
+    )
+    return "inserted"
+
+
+def _all_normalize_data_time(value: str) -> Optional[str]:
+    value = value.strip()
+    if not value:
+        return None
+    if "." in value:
+        value = value.split(".", 1)[0]
+    return value
+
+
+def _all_parse_log_metadata(
+    log_path: Path,
+) -> Tuple[Optional[Tuple[str, str, str, str, str]], Optional[str]]:
+    station = log_path.parent.name
+    satellite = None
+    header_station = None
+    start_time = None
+    first_data_time = None
+    last_data_time = None
+
+    try:
+        with log_path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("#Station:"):
+                    header_station = line.split(":", 1)[1].strip()
+                    continue
+                if line.startswith("#Satellite:"):
+                    satellite = line.split(":", 1)[1].strip()
+                    continue
+                if line.startswith("#Start time:"):
+                    start_time = _all_normalize_data_time(line.split(":", 1)[1])
+                    continue
+                if line[0].isdigit():
+                    parts = line.split()
+                    if len(parts) >= 2 and ":" in parts[1]:
+                        data_time = f"{parts[0]} {parts[1]}"
+                    else:
+                        data_time = parts[0]
+                    data_time = _all_normalize_data_time(data_time)
+                    if data_time:
+                        if first_data_time is None:
+                            first_data_time = data_time
+                        last_data_time = data_time
+    except OSError:
+        return None, "read_error"
+
+    station = header_station or station
+    session_start = start_time or first_data_time
+    session_end = last_data_time or session_start
+
+    missing = []
+    if not satellite:
+        missing.append("missing_satellite")
+    if not session_start:
+        missing.append("missing_start_time")
+    if not session_end:
+        missing.append("missing_end_time")
+    if missing:
+        return None, ",".join(missing)
+
+    bend_type = detect_bend_type_from_header(log_path)
+    snr_sum, snr_count = extract_snr_from_log(log_path, bend_type)
+    avg_snr = snr_sum / snr_count if snr_count > 0 else 0.0
+    if str(satellite).upper() == "TY-42":
+        successful = "Yes" if avg_snr > 7.0 else "No"
+    else:
+        threshold = X_BEND_FAILURE_THRESHOLD if bend_type == "X" else L_BEND_FAILURE_THRESHOLD
+        successful = "Yes" if avg_snr > threshold else "No"
+
+    return (station, satellite, session_start, session_end, successful), None
+
+
+def update_all_passes_db_for_date(target_date: str) -> None:
+    year, month, date_str, _ = get_date_paths(target_date)
+    base_logs_dir = Path("/root/lorett/GroundLinkMonitorServer/logs") / year / month / date_str
+    if not base_logs_dir.exists():
+        logger.warning("Папка логов не найдена для даты %s: %s", target_date, base_logs_dir)
+        return
+
+    conn = _all_db_init(ALL_PASSES_DB_PATH)
+    inserted = 0
+    updated = 0
+    skipped = 0
+    try:
+        for log_path in base_logs_dir.rglob("*.log"):
+            metadata, reason = _all_parse_log_metadata(log_path)
+            if metadata is None:
+                skipped += 1
+                logger.warning("all_passes SKIP %s reason=%s", log_path, reason or "unknown")
+                continue
+            station, satellite, session_start, session_end, successful = metadata
+            action = _all_db_upsert_pass(
+                conn, station, satellite, session_start, session_end, successful
+            )
+            if action == "inserted":
+                inserted += 1
+            elif action == "updated":
+                updated += 1
+    finally:
+        conn.close()
+
+    logger.info(
+        "all_passes sync done for %s: inserted=%s updated=%s skipped=%s",
+        target_date,
+        inserted,
+        updated,
+        skipped,
+    )
+
+
+def _list_db_tables(conn: sqlite3.Connection) -> List[str]:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name != 'sqlite_sequence'"
+    )
+    tables = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+    return tables
+
+
+def _comm_get_day_bounds(target_date: str) -> Tuple[str, str]:
+    target_day = datetime.strptime(target_date, "%Y%m%d")
+    day_start = target_day.strftime("%Y-%m-%d 00:00:00")
+    day_end = target_day.strftime("%Y-%m-%d 23:59:59")
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    if now_str < day_end:
+        day_end = now_str
+    return day_start, day_end
+
+
+def _comm_is_commercial_satellite(satellite: str, tokens: List[str]) -> bool:
+    sat = satellite.upper()
+    for token in tokens:
+        if not token:
+            continue
+        if len(token) <= 3:
+            if sat.startswith(token) or f"{token}-" in sat:
+                return True
+        else:
+            if token in sat:
+                return True
+    return False
+
+
+def _comm_collect_stats(target_date: str) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+    commercial_tokens = [s.upper() for s in _load_commercial_satellites()]
+    comm_conn = sqlite3.connect(COMM_DB_PATH)
+    all_conn = sqlite3.connect(ALL_PASSES_DB_PATH)
+
+    stats: Dict[str, Dict[str, int]] = {}
+    totals = {"planned": 0, "successful": 0, "not_received": 0}
+
+    try:
+        comm_tables = _list_db_tables(comm_conn)
+        all_tables = set(_list_db_tables(all_conn))
+        day_start, day_end = _comm_get_day_bounds(target_date)
+
+        for station in sorted(comm_tables):
+            station_q = _comm_quote_identifier(station)
+            comm_cur = comm_conn.cursor()
+            comm_cur.execute(
+                f"""
+                SELECT satellite, session_start, session_end
+                FROM {station_q}
+                WHERE datetime(session_start) >= datetime(?)
+                  AND datetime(session_start) <= datetime(?)
+                """,
+                (day_start, day_end),
+            )
+            rows = [
+                row
+                for row in comm_cur.fetchall()
+                if _comm_is_commercial_satellite(str(row[0]), commercial_tokens)
+            ]
+            comm_cur.close()
+
+            planned = len(rows)
+            if planned == 0:
+                continue
+
+            successful = 0
+            not_received = 0
+
+            if station not in all_tables:
+                not_received = planned
+            else:
+                all_q = _all_db_quote_identifier(station)
+                all_cur = all_conn.cursor()
+                for satellite, session_start, session_end in rows:
+                    all_cur.execute(
+                        f"""
+                        SELECT successful
+                        FROM {all_q}
+                        WHERE satellite = ?
+                          AND datetime(session_start) <= datetime(?)
+                          AND datetime(session_end) >= datetime(?)
+                        LIMIT 1
+                        """,
+                        (satellite, session_start, session_end),
+                    )
+                    match = all_cur.fetchone()
+                    if not match:
+                        not_received += 1
+                    elif match[0] == "Yes":
+                        successful += 1
+                    else:
+                        not_received += 1
+                all_cur.close()
+
+            stats[station] = {
+                "planned": planned,
+                "successful": successful,
+                "not_received": not_received,
+            }
+            totals["planned"] += planned
+            totals["successful"] += successful
+            totals["not_received"] += not_received
+    finally:
+        comm_conn.close()
+        all_conn.close()
+
+    return stats, totals
+
+
+def print_comm_passes_status(target_date: str) -> None:
+    """Сверяет запланированные коммерческие пролеты с all_passes.db и печатает статус."""
+    stats, totals = _comm_collect_stats(target_date)
+
+    print(f"\n{Fore.CYAN + Style.BRIGHT}СТАТУС КОММЕРЧЕСКИХ ПРОЛЕТОВ  {target_date}")
+    print(f"{Fore.CYAN}{'Станция':<30} {'Всего':>10} {'Успешных':>12} {'Не принятых':>12} {'% не принятых':>15}")
+    print("-" * 75)
+
+    for station in sorted(stats.keys()):
+        planned = stats[station]["planned"]
+        successful = stats[station]["successful"]
+        not_received = stats[station]["not_received"]
+        percent = (not_received / planned * 100) if planned > 0 else 0.0
+        print(
+            f"{Fore.CYAN}{station:<30} {planned:>10} {successful:>12} {not_received:>12} {percent:>14.1f}%"
+        )
+
+    print("-" * 75)
+    total_percent = (totals["not_received"] / totals["planned"] * 100) if totals["planned"] > 0 else 0.0
+    print(
+        f"{Fore.GREEN + Style.BRIGHT}{'ИТОГО':<30} {totals['planned']:>10} "
+        f"{totals['successful']:>12} {totals['not_received']:>12} {total_percent:>14.1f}%"
+    )
+    logger.info(
+        "comm_passes status for %s: planned=%s yes=%s not_received=%s",
+        target_date,
+        totals["planned"],
+        totals["successful"],
+        totals["not_received"],
+    )
+
+
+def _comm_collect_log_links(target_date: str) -> Dict[str, List[str]]:
+    """Собирает ссылки на графики коммерческих пролетов (успешные/неуспешные)."""
+    commercial_tokens = [s.upper() for s in _load_commercial_satellites()]
+    comm_conn = sqlite3.connect(COMM_DB_PATH)
+
+    try:
+        _, _, date_str, _ = get_date_paths(target_date)
+        logs_dir = Path("/root/lorett/GroundLinkMonitorServer/logs")
+        base_logs_dir = logs_dir / date_str[:4] / date_str[4:6] / date_str
+        if not base_logs_dir.exists():
+            return {"successful": [], "unsuccessful": []}
+
+        day_start, day_end = _comm_get_day_bounds(target_date)
+        day_start_dt = datetime.fromisoformat(day_start)
+        day_end_dt = datetime.fromisoformat(day_end)
+
+        # Индекс логов по станции
+        log_index: Dict[str, List[Dict[str, Any]]] = {}
+        for log_path in base_logs_dir.rglob("*.log"):
+            metadata, _reason = _all_parse_log_metadata(log_path)
+            if metadata is None:
+                continue
+            station, satellite, session_start, session_end, successful = metadata
+            try:
+                start_dt = datetime.fromisoformat(session_start)
+                end_dt = datetime.fromisoformat(session_end)
+            except ValueError:
+                continue
+            log_index.setdefault(station, []).append(
+                {
+                    "satellite": satellite,
+                    "start": start_dt,
+                    "end": end_dt,
+                    "successful": successful,
+                    "filename": log_path.name,
+                }
+            )
+
+        # Базовый URL для просмотра графиков
+        _, _, base_urls, _headers, _alias_to_canonical = load_config()
+        base_url = base_urls.get("reg") or base_urls.get("oper") or "https://eus.lorett.org/eus"
+
+        success_links: set[str] = set()
+        fail_links: set[str] = set()
+
+        for station in _list_db_tables(comm_conn):
+            station_q = _comm_quote_identifier(station)
+            comm_cur = comm_conn.cursor()
+            comm_cur.execute(
+                f"""
+                SELECT satellite, session_start, session_end
+                FROM {station_q}
+                WHERE datetime(session_start) >= datetime(?)
+                  AND datetime(session_start) <= datetime(?)
+                """,
+                (day_start, day_end),
+            )
+            rows = [
+                row
+                for row in comm_cur.fetchall()
+                if _comm_is_commercial_satellite(str(row[0]), commercial_tokens)
+            ]
+            comm_cur.close()
+
+            entries = log_index.get(station, [])
+            if not entries:
+                continue
+
+            for satellite, session_start, session_end in rows:
+                try:
+                    start_dt = datetime.fromisoformat(session_start)
+                    end_dt = datetime.fromisoformat(session_end)
+                except ValueError:
+                    continue
+                if start_dt < day_start_dt or start_dt > day_end_dt:
+                    continue
+
+                match = None
+                for entry in entries:
+                    if str(entry["satellite"]).upper() != str(satellite).upper():
+                        continue
+                    if entry["start"] <= start_dt and entry["end"] >= end_dt:
+                        match = entry
+                        break
+
+                if not match:
+                    continue
+
+                log_url = f"{base_url}/log_view/{quote(str(match['filename']))}"
+                if match["successful"] == "Yes":
+                    success_links.add(log_url)
+                else:
+                    fail_links.add(log_url)
+
+        return {
+            "successful": sorted(success_links),
+            "unsuccessful": sorted(fail_links),
+        }
+    finally:
+        comm_conn.close()
+
+
+def _comm_split_by_double_newline(text: str) -> List[str]:
+    chunks = [part.strip() for part in text.split("\n\n")]
+    return [part for part in chunks if part]
+
+
+def _comm_quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _comm_init_db(db_path: str) -> sqlite3.Connection:
+    return sqlite3.connect(db_path)
+
+
+def _comm_ensure_station_table(conn: sqlite3.Connection, station: str) -> None:
+    table_name = _comm_quote_identifier(station)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY,
+            satellite TEXT NOT NULL,
+            session_start TIMESTAMP NOT NULL,
+            session_end TIMESTAMP NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    cursor.close()
+
+
+def _comm_upsert_pass(
+    conn: sqlite3.Connection,
+    station: str,
+    satellite: str,
+    session_start: str,
+    session_end: str,
+) -> str:
+    _comm_ensure_station_table(conn, station)
+    table_name = _comm_quote_identifier(station)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT id, session_end
+        FROM {table_name}
+        WHERE satellite = ?
+          AND session_start = ?
+        LIMIT 1
+        """,
+        (satellite, session_start),
+    )
+    existing = cursor.fetchone()
+    if existing is not None:
+        row_id, current_end = existing
+        if current_end != session_end:
+            cursor.execute(
+                f"UPDATE {table_name} SET session_end = ? WHERE id = ?",
+                (session_end, row_id),
+            )
+            conn.commit()
+            logger.info(
+                "comm_passes UPDATE station=%s satellite=%s start=%s end=%s",
+                station,
+                satellite,
+                session_start,
+                session_end,
+            )
+            cursor.close()
+            return "updated"
+        cursor.close()
+        return "exists"
+    cursor.execute(
+        f"INSERT INTO {table_name} (satellite, session_start, session_end) VALUES (?, ?, ?)",
+        (satellite, session_start, session_end),
+    )
+    conn.commit()
+    cursor.close()
+    logger.info(
+        "comm_passes INSERT station=%s satellite=%s start=%s end=%s",
+        station,
+        satellite,
+        session_start,
+        session_end,
+    )
+    return "inserted"
+
+
+def _comm_parse_passes(text: str) -> List[Tuple[str, str, str, str]]:
+    passes: List[Tuple[str, str, str, str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = COMM_PASS_LINE_RE.match(line)
+        if not match:
+            continue
+        station = match.group("station")
+        station = COMM_STATION_ALIASES.get(station, station)
+        satellite = match.group("satellite")
+        date = match.group("date").replace(".", "-").replace("/", "-")
+        start_time = match.group("start")
+        end_time = match.group("end")
+        session_start = f"{date} {start_time}"
+        session_end = f"{date} {end_time}"
+        passes.append((station, satellite, session_start, session_end))
+    return passes
+
+
+def _comm_insert_from_parts(conn: sqlite3.Connection, parts: List[str]) -> Tuple[int, int]:
+    inserted = 0
+    updated = 0
+    for part in parts:
+        for station, satellite, start, end in _comm_parse_passes(part):
+            action = _comm_upsert_pass(conn, station, satellite, start, end)
+            if action == "inserted":
+                inserted += 1
+            elif action == "updated":
+                updated += 1
+    return inserted, updated
+
+
+async def _comm_start_telegram_client() -> "TelegramClient":
+    client: Optional["TelegramClient"] = None
+    try:
+        client = TelegramClient(TG_SESSION, TG_API_ID, TG_API_HASH)
+        await client.start()
+        return client
+    except sqlite3.OperationalError as exc:
+        if "database is locked" not in str(exc).lower():
+            raise
+        if client is not None:
+            await client.disconnect()
+        fallback_session = f"{TG_SESSION}_pid{os.getpid()}"
+        client = TelegramClient(fallback_session, TG_API_ID, TG_API_HASH)
+        await client.start()
+        return client
+
+
+async def sync_comm_passes_once() -> None:
+    if not TELETHON_AVAILABLE:
+        raise SystemExit("telethon не установлен. Установите: pip install telethon")
+    if not TG_API_ID or not TG_API_HASH or not TG_CHANNEL:
+        raise SystemExit("Set TG_API_ID, TG_API_HASH, TG_CHANNEL")
+
+    logger.info("Синхронизация Telegram канала: %s", TG_CHANNEL)
+    client = await _comm_start_telegram_client()
+    db_conn = _comm_init_db(COMM_DB_PATH)
+
+    try:
+        total_msgs = 0
+        total_inserted = 0
+        total_updated = 0
+        async for msg in client.iter_messages(TG_CHANNEL, reverse=True):
+            total_msgs += 1
+            text = msg.message or ""
+            parts = _comm_split_by_double_newline(text)
+            inserted, updated = _comm_insert_from_parts(db_conn, parts)
+            total_inserted += inserted
+            total_updated += updated
+        logger.info(
+            "Синхронизация завершена: сообщений=%s, вставлено=%s, обновлено=%s",
+            total_msgs,
+            total_inserted,
+            total_updated,
+        )
+    finally:
+        db_conn.close()
+        await client.disconnect()
+
+
+def _run_comm_passes_sync() -> None:
+    if not TELETHON_AVAILABLE:
+        logger.warning("telethon не установлен, синхронизация Telegram отключена")
+        return
+    if not TG_API_ID or not TG_API_HASH or not TG_CHANNEL:
+        logger.warning("TG_API_ID/TG_API_HASH/TG_CHANNEL не заданы, синхронизация Telegram отключена")
+        return
+    try:
+        asyncio.run(sync_comm_passes_once())
+    except Exception as exc:
+        logger.error(f"Ошибка синхронизации Telegram: {exc}", exc_info=True)
+
+
+def _log_config_full() -> None:
+    """Логирует config.json полностью (без изменений)."""
+    try:
+        config_path = Path("/root/lorett/GroundLinkMonitorServer/config.json")
+        if not config_path.exists():
+            logger.warning(f"config.json не найден: {config_path}")
+            return
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+        # Пишем как есть (без маскировки)
+        logger.info("config.json (full): %s", raw)
+    except Exception as e:
+        logger.error(f"Не удалось залогировать config.json: {e}", exc_info=True)
+
+
+def _load_debug_email_from_config() -> Optional[str]:
+    try:
+        config_path = Path("/root/lorett/GroundLinkMonitorServer/config.json")
+        if not config_path.exists():
+            return None
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        if not isinstance(config, dict):
+            return None
+        email_cfg = config.get("email", {})
+        if not isinstance(email_cfg, dict):
+            return None
+        return email_cfg.get("debug_recipient")
+    except Exception:
+        return None
 
 
 # === Константы (загружаются из config.json с fallback на значения по умолчанию) ===
@@ -306,14 +1003,20 @@ def get_email_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     attach_report_raw = email_cfg.get("attach_report", os.getenv("EMAIL_ATTACH_REPORT", "1"))
     attach_report = True if attach_report_raw is None else str(attach_report_raw).strip().lower() in ("1", "true", "yes", "y", "on")
 
+    recipients_final = recipients
+    cc_final = cc_recipients
+    if EMAIL_DEBUG_RECIPIENT:
+        recipients_final = [EMAIL_DEBUG_RECIPIENT]
+        cc_final = []
+
     return {
         "enabled": enabled,
         "smtp_server": smtp_server,
         "smtp_port": smtp_port,
         "sender_email": sender_email,
         "sender_password": sender_password,
-        "recipients": recipients,
-        "cc_recipients": cc_recipients,
+        "recipients": recipients_final,
+        "cc_recipients": cc_final,
         "subject": subject,
         "attach_report": attach_report,
     }
@@ -486,11 +1189,84 @@ def generate_overall_unsuccessful_7d_chart(
         return None
 
 
+def generate_comm_unsuccessful_7d_chart(
+    *,
+    target_date: str,
+    output_path: Path,
+    days: int = 7,
+) -> Optional[Path]:
+    """
+    Генерирует PNG график процента неуспешных коммерческих пролетов за последние N дней.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # type: ignore
+        logging.getLogger("matplotlib").setLevel(logging.WARNING)
+
+        date_obj = datetime.strptime(target_date, "%Y%m%d")
+        points: List[Tuple[str, Optional[float]]] = []
+
+        for i in range(days - 1, -1, -1):
+            d = date_obj - timedelta(days=i)
+            d_str = d.strftime("%Y%m%d")
+            stats, totals = _comm_collect_stats(d_str)
+            if totals["planned"] > 0:
+                percent = totals["not_received"] / totals["planned"] * 100
+                points.append((d.strftime("%d.%m"), percent))
+            else:
+                points.append((d.strftime("%d.%m"), None))
+
+        labels = [p[0] for p in points]
+        values = [(p[1] if p[1] is not None else float("nan")) for p in points]
+        x = list(range(len(labels)))
+
+        fig = plt.figure(figsize=(10, 3.2), dpi=150)
+        ax = fig.add_subplot(111)
+        ax.plot(
+            x,
+            values,
+            color="#ff9f0a",
+            linewidth=2,
+            marker="o",
+            markersize=4,
+        )
+        ax.set_xticks(x, labels)
+        ax.set_ylim(0, 100)
+        ax.set_yticks(list(range(0, 101, 10)))
+        ax.set_ylabel("% не принятых")
+        ax.set_title("Коммерческие пролеты: % не принятых за последние 7 дней")
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+        for idx, (lbl, v) in enumerate(points):
+            if v is None:
+                ax.text(x[idx], 0.5, "нет\nданных", ha="center", va="bottom", fontsize=7, color="#616161")
+            else:
+                ax.text(x[idx], min(99.5, v + 1.5), f"{v:.1f}%", ha="center", va="bottom", fontsize=7, color="#212121")
+
+        fig.tight_layout()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, bbox_inches="tight")
+        plt.close(fig)
+        return output_path
+    except ImportError:
+        logger.warning("matplotlib не установлен — коммерческий график за 7 дней не будет добавлен в письмо")
+        return None
+    except Exception as e:
+        logger.warning(f"Не удалось сгенерировать коммерческий график за 7 дней: {e}", exc_info=True)
+        return None
+
+
 def build_stats_email_body(
     target_date: str,
     all_results: Dict[str, Dict[str, Any]],
     graphs_dir: Optional[Path] = None,
     summary_7d_chart_path: Optional[Path] = None,
+    comm_stats: Optional[Dict[str, Dict[str, int]]] = None,
+    comm_totals: Optional[Dict[str, int]] = None,
+    comm_summary_7d_chart_path: Optional[Path] = None,
+    comm_links: Optional[Dict[str, List[str]]] = None,
 ) -> Tuple[str, Dict[str, Path]]:
     """
     Формирует HTML таблицу статистики для письма и собирает графики для встраивания.
@@ -512,17 +1288,17 @@ def build_stats_email_body(
         "  * { box-sizing: border-box; }",
         "  body {",
         "    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif;",
-        "    font-size: 15px;",
+        "    font-size: 14px;",
         "    line-height: 1.6;",
         "    color: #1d1d1f;",
         "    background-color: #f5f5f7;",
         "    margin: 0;",
-        "    padding: 12px 8px;",
+        "    padding: 10px 6px;",
         "    -webkit-text-size-adjust: 100%;",
         "    -ms-text-size-adjust: 100%;",
         "  }",
         "  .container {",
-        "    max-width: 900px;",
+        "    max-width: 820px;",
         "    margin: 0 auto;",
         "    background-color: #ffffff;",
         "    border-radius: 12px;",
@@ -530,25 +1306,25 @@ def build_stats_email_body(
         "    overflow: hidden;",
         "  }",
         "  .header {",
-        "    padding: 20px 16px 14px;",
+        "    padding: 16px 14px 12px;",
         "    border-bottom: 1px solid #e5e5e7;",
         "    background: linear-gradient(to bottom, #ffffff, #fafafa);",
         "  }",
         "  h2 {",
-        "    font-size: 20px;",
+        "    font-size: 18px;",
         "    font-weight: 600;",
         "    letter-spacing: -0.5px;",
         "    color: #1d1d1f;",
         "    margin: 0 0 8px 0;",
         "  }",
         "  .date {",
-        "    font-size: 17px;",
+        "    font-size: 15px;",
         "    color: #86868b;",
         "    font-weight: 400;",
         "    margin: 0;",
         "  }",
         "  .content {",
-        "    padding: 12px;",
+        "    padding: 10px;",
         "  }",
         "  .table-wrap {",
         "    width: 100%;",
@@ -557,7 +1333,7 @@ def build_stats_email_body(
         "  }",
         "  .adaptive-table {",
         "    width: 100%;",
-        "    min-width: 600px;",
+        "    min-width: 560px;",
         "    border-collapse: separate;",
         "    border-spacing: 0;",
         "    background-color: #ffffff;",
@@ -567,9 +1343,9 @@ def build_stats_email_body(
         "  }",
         "  .adaptive-table thead { background-color: #f5f5f7; }",
         "  .adaptive-table th {",
-        "    padding: 16px 20px;",
+        "    padding: 12px 14px;",
         "    text-align: left;",
-        "    font-size: 13px;",
+        "    font-size: 12px;",
         "    font-weight: 600;",
         "    color: #86868b;",
         "    text-transform: uppercase;",
@@ -581,10 +1357,10 @@ def build_stats_email_body(
         "  .adaptive-table th:last-child { border-right: none; }",
         "  .adaptive-table th.number { text-align: right; }",
         "  .adaptive-table td {",
-        "    padding: 16px 20px;",
+        "    padding: 12px 14px;",
         "    border-bottom: 1px solid #f5f5f7;",
         "    border-right: 1px solid #e5e5e7;",
-        "    font-size: 15px;",
+        "    font-size: 14px;",
         "    color: #1d1d1f;",
         "    white-space: nowrap;",
         "  }",
@@ -735,18 +1511,18 @@ def build_stats_email_body(
         "  .desktop-table .row-warning { background-color: #fef3c7; }",
         "  .desktop-table .row-error { background-color: #fee2e2; }",
         "  .graph-section {",
-        "    margin-top: 24px;",
-        "    padding: 10px 8px;",
+        "    margin-top: 18px;",
+        "    padding: 8px 6px;",
         "    background-color: #fafafa;",
         "    border-radius: 12px;",
         "    page-break-inside: avoid;",
         "  }",
         "  .graph-title {",
-        "    font-size: 20px;",
+        "    font-size: 17px;",
         "    font-weight: 600;",
         "    letter-spacing: -0.3px;",
         "    color: #1d1d1f;",
-        "    margin-bottom: 20px;",
+        "    margin-bottom: 14px;",
         "  }",
         "  .graph-image {",
         "    max-width: 100%;",
@@ -758,19 +1534,33 @@ def build_stats_email_body(
         "  .empty-message {",
         "    color: #86868b;",
         "    font-style: italic;",
-        "    font-size: 14px;",
-        "    padding: 16px 0;",
+        "    font-size: 13px;",
+        "    padding: 12px 0;",
         "  }",
         "  .unsuccessful-list {",
-        "    margin-top: 20px;",
-        "    padding: 20px;",
+        "    margin-top: 16px;",
+        "    padding: 14px;",
         "    background-color: #fff5f5;",
         "    border-radius: 8px;",
         "    border-left: 3px solid #ff3b30;",
         "  }",
+        "  .successful-list {",
+        "    margin-top: 16px;",
+        "    padding: 14px;",
+        "    background-color: #ecfdf5;",
+        "    border-radius: 8px;",
+        "    border-left: 3px solid #2e7d32;",
+        "  }",
         "  .unsuccessful-list strong {",
         "    color: #ff3b30;",
-        "    font-size: 17px;",
+        "    font-size: 15px;",
+        "    font-weight: 600;",
+        "    display: block;",
+        "    margin-bottom: 12px;",
+        "  }",
+        "  .successful-list strong {",
+        "    color: #2e7d32;",
+        "    font-size: 15px;",
         "    font-weight: 600;",
         "    display: block;",
         "    margin-bottom: 12px;",
@@ -779,24 +1569,30 @@ def build_stats_email_body(
         "    margin: 0;",
         "    padding-left: 20px;",
         "    color: #1d1d1f;",
-        "    font-size: 16px;",
+        "    font-size: 14px;",
+        "  }",
+        "  .successful-list ul {",
+        "    margin: 0;",
+        "    padding-left: 20px;",
+        "    color: #1d1d1f;",
+        "    font-size: 14px;",
         "  }",
         "  .unsuccessful-list li {",
         "    margin-bottom: 6px;",
         "  }",
         "  .chart-container {",
-        "    margin-top: 32px;",
-        "    padding: 10px 8px;",
+        "    margin-top: 24px;",
+        "    padding: 8px 6px;",
         "    background-color: #fafafa;",
         "    border-radius: 12px;",
         "  }",
         "  /* Адаптивные отступы (без media-query, используем фиксированные значения) */",
-        "  body { padding: 12px 8px; }",
-        "  .container { border-radius: 12px; }",
-        "  .header { padding: 20px 16px 14px; }",
-        "  .content { padding: 12px; }",
-        "  .graph-section { padding: 10px 8px; }",
-        "  .chart-container { padding: 10px 8px; }",
+        "  body { padding: 10px 6px; }",
+        "  .container { border-radius: 10px; }",
+        "  .header { padding: 16px 14px 12px; }",
+        "  .content { padding: 10px; }",
+        "  .graph-section { padding: 8px 6px; }",
+        "  .chart-container { padding: 8px 6px; }",
         "</style>",
         "</head>",
         "<body>",
@@ -804,23 +1600,102 @@ def build_stats_email_body(
         "  <div class='header'>",
         f"    <h2>Сводка по станциям {date_display}</h2>",
         "  </div>",
-        "  <div class='content'>",
-        "    <div class='table-wrap'>",
-        "      <table class='adaptive-table'>",
-        "        <thead>",
-        "          <tr>",
-        "            <th>Станция</th>",
-        "            <th class='number'>Всего</th>",
-        "            <th class='number'>Успешных</th>",
-        "            <th class='number'>Пустых</th>",
-        "            <th class='number'>% пустых</th>",
-        "          </tr>",
-        "        </thead>",
-        "        <tbody>"
+        "  <div class='content'>"
     ]
 
     # Словарь для хранения графиков: {cid: путь_к_файлу}
     inline_images = {}
+
+    # Коммерческие пролеты (таблица) — выводим первым блоком
+    if comm_stats is not None and comm_totals is not None:
+        html_lines.append("    <h2 style='margin-top: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Коммерческие пролеты</h2>")
+        html_lines.append("    <div class='table-wrap'>")
+        html_lines.append("      <table class='adaptive-table'>")
+        html_lines.append("        <thead>")
+        html_lines.append("          <tr>")
+        html_lines.append("            <th>Станция</th>")
+        html_lines.append("            <th class='number'>Всего</th>")
+        html_lines.append("            <th class='number'>Успешных</th>")
+        html_lines.append("            <th class='number'>Не принятых</th>")
+        html_lines.append("            <th class='number'>% не принятых</th>")
+        html_lines.append("          </tr>")
+        html_lines.append("        </thead>")
+        html_lines.append("        <tbody>")
+
+        for station_name in sorted(comm_stats.keys()):
+            stats = comm_stats[station_name]
+            planned = int(stats.get("planned", 0))
+            successful = int(stats.get("successful", 0))
+            not_received = int(stats.get("not_received", 0))
+            percent = (not_received / planned * 100) if planned > 0 else 0.0
+            station_name_escaped = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            html_lines.append("        <tr>")
+            html_lines.append(f"          <td>{station_name_escaped}</td>")
+            html_lines.append(f"          <td class='number'>{planned}</td>")
+            html_lines.append(f"          <td class='number'>{successful}</td>")
+            html_lines.append(f"          <td class='number'>{not_received}</td>")
+            html_lines.append(f"          <td class='number'>{percent:.1f}%</td>")
+            html_lines.append("        </tr>")
+
+        total_planned = int(comm_totals.get("planned", 0))
+        total_successful = int(comm_totals.get("successful", 0))
+        total_not_received = int(comm_totals.get("not_received", 0))
+        total_percent = (total_not_received / total_planned * 100) if total_planned > 0 else 0.0
+        html_lines.append("        <tr class='total-row'>")
+        html_lines.append("          <td>ИТОГО</td>")
+        html_lines.append(f"          <td class='number'>{total_planned}</td>")
+        html_lines.append(f"          <td class='number'>{total_successful}</td>")
+        html_lines.append(f"          <td class='number'>{total_not_received}</td>")
+        html_lines.append(f"          <td class='number'>{total_percent:.1f}%</td>")
+        html_lines.append("        </tr>")
+        html_lines.append("        </tbody>")
+        html_lines.append("      </table>")
+        html_lines.append("    </div>")
+
+        if comm_summary_7d_chart_path and Path(comm_summary_7d_chart_path).exists():
+            comm_cid = "comm_unsuccessful_7d"
+            inline_images[comm_cid] = Path(comm_summary_7d_chart_path)
+            html_lines.append("    <div class='chart-container'>")
+            html_lines.append(f"      <img src='cid:{comm_cid}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='Коммерческие пролеты: % не принятых за 7 дней' />")
+            html_lines.append("    </div>")
+
+        if comm_links:
+            success_links = comm_links.get("successful") or []
+            fail_links = comm_links.get("unsuccessful") or []
+            html_lines.append("    <div class='graph-section'>")
+            html_lines.append("      <div class='graph-title'>Графики коммерческих пролетов</div>")
+            if success_links:
+                html_lines.append("      <div class='successful-list'>")
+                html_lines.append("        <strong>Успешные коммерческие пролеты:</strong>")
+                html_lines.append("        <ul>")
+                for url in success_links:
+                    html_lines.append(f"          <li><a href='{url}'>{url}</a></li>")
+                html_lines.append("        </ul>")
+                html_lines.append("      </div>")
+            if fail_links:
+                html_lines.append("      <div class='unsuccessful-list'>")
+                html_lines.append("        <strong>Неуспешные:</strong>")
+                html_lines.append("        <ul>")
+                for url in fail_links:
+                    html_lines.append(f"          <li><a href='{url}'>{url}</a></li>")
+                html_lines.append("        </ul>")
+                html_lines.append("      </div>")
+            html_lines.append("    </div>")
+
+    # Общая статистика по станциям
+    html_lines.append("    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Общая статистика</h2>")
+    html_lines.append("    <div class='table-wrap'>")
+    html_lines.append("      <table class='adaptive-table'>")
+    html_lines.append("        <thead>")
+    html_lines.append("          <tr>")
+    html_lines.append("            <th>Станция</th>")
+    html_lines.append("            <th class='number'>Всего</th>")
+    html_lines.append("            <th class='number'>Успешных</th>")
+    html_lines.append("            <th class='number'>Пустых</th>")
+    html_lines.append("            <th class='number'>% пустых</th>")
+    html_lines.append("          </tr>")
+    html_lines.append("        </thead>")
+    html_lines.append("        <tbody>")
 
     # Сортируем станции по среднему SNR (как в консоли)
     sorted_stations = sorted(all_results.items(), key=lambda x: x[1].get('avg_snr', 0), reverse=True)
@@ -883,7 +1758,7 @@ def build_stats_email_body(
         html_lines.append("    </div>")
     else:
         html_lines.append("    <p class='empty-message'>Нет данных для построения графика.</p>")
-    
+
     # Добавляем графики после таблицы
     if graphs_dir and graphs_dir.exists():
         html_lines.append("    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Графики пролетов</h2>")
@@ -2458,6 +3333,13 @@ def analyze_downloaded_logs(target_date: str) -> None:
             
             print(f"{Fore.GREEN}  Результаты сохранены в файл: {output_file}")
     
+    # Перед итоговой сводкой обновляем all_passes.db по станциям
+    try:
+        update_all_passes_db_for_date(target_date)
+        print_comm_passes_status(target_date)
+    except Exception as e:
+        logger.error(f"Не удалось обновить all_passes.db: {e}", exc_info=True)
+
     # Итоговая сводка
     if stations:
         # Преобразуем дату из YYYYMMDD в YYYY-MM-DD для отображения
@@ -2581,12 +3463,24 @@ def analyze_downloaded_logs(target_date: str) -> None:
                     output_path=summary_chart_path,
                     days=7,
                 )
+                comm_summary_chart_path = graphs_dir / "comm_unsuccessful_7d.png"
+                generated_comm_summary = generate_comm_unsuccessful_7d_chart(
+                    target_date=target_date,
+                    output_path=comm_summary_chart_path,
+                    days=7,
+                )
+                comm_stats, comm_totals = _comm_collect_stats(target_date)
+                comm_links = _comm_collect_log_links(target_date)
 
                 body, inline_images = build_stats_email_body(
                     target_date,
                     all_results,
                     graphs_dir,
                     generated_summary,
+                    comm_stats,
+                    comm_totals,
+                    generated_comm_summary,
+                    comm_links,
                 )
                 attachments = []
 
@@ -2609,7 +3503,6 @@ def analyze_downloaded_logs(target_date: str) -> None:
         except Exception as e:
             logger.warning(f"Неожиданная ошибка при отправке email: {e}", exc_info=True)
             print(f"{Fore.YELLOW}Предупреждение: не удалось отправить email: {e}")
-        
 
 # Загружает конфигурацию станций и создает словари: станция->тип и станция->диапазон (bend)
 def load_stations_from_config_for_analysis(config_path: Path = Path("/root/lorett/GroundLinkMonitorServer/config.json")) -> Tuple[dict, dict]:
@@ -2668,6 +3561,7 @@ def run_daily_report():
         
         logger.info(f"Дата для отчёта: {date_display} ({date_str})")
         logger.info(f"Время запуска: {start_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        _log_config_full()
         print(f"{Fore.CYAN + Style.BRIGHT}\n{'='*80}")
         print(f"{Fore.CYAN + Style.BRIGHT}АВТОМАТИЧЕСКАЯ ОТПРАВКА СТАТИСТИКИ")
         print(f"{Fore.CYAN}Дата: {date_display} ({date_str})")
@@ -2709,6 +3603,7 @@ def scheduler_loop():
     logger.info("ПЛАНИРОВЩИК LORETT GROUND LINK MONITOR ЗАПУЩЕН")
     logger.info("=" * 60)
     logger.info(f"Время запуска: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    _log_config_full()
     logger.info("Режим: ежедневная отправка статистики в 00:00 UTC")
     print(f"{Fore.GREEN}Планировщик автоматической отправки статистики запущен")
     print(f"{Fore.CYAN}Отправка будет происходить каждый день в 00:00 UTC")
@@ -2787,10 +3682,17 @@ def scheduler_loop():
 
 if __name__ == "__main__":
     import sys
+    _run_comm_passes_sync()
     # Флаг: отключить отправку email
     if "-OffEmail" in sys.argv or "--off-email" in sys.argv:
         EMAIL_DISABLED = True
         sys.argv = [arg for arg in sys.argv if arg not in ("-OffEmail", "--off-email")]
+
+    # Флаг: отправлять письмо только на один адрес
+    if "--debug-email" in sys.argv or "--debag-email" in sys.argv:
+        EMAIL_DEBUG_RECIPIENT = _load_debug_email_from_config() or "eyenot2@yandex.ru"
+        sys.argv = [arg for arg in sys.argv if arg not in ("--debug-email", "--debag-email")]
+
 
     # Флаг: статистика по выбранным спутникам за период
     if "--stat-commers" in sys.argv:
