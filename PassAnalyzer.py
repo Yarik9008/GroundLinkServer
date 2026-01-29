@@ -12,16 +12,17 @@ class PassAnalyzer:
     """Анализатор лог-файлов пролетов.
 
     Назначение:
-        - Читает лог-файлы по `log_path`.
-        - Определяет окно приема по SNR-порогам.
-        - Заполняет SNR-метрики, время приема и время пролета.
+        - Разбирает заголовок лога (id, спутник, станция, координаты, даты).
+        - Парсит таблицу измерений и считает SNR-метрики.
+        - Определяет окно приема по State (если есть) или по порогу SNR.
+        - Заполняет и возвращает объекты SatPas.
 
-    Ключевая логика:
-        - Порог старта: SNR первой строки + 3.
-        - Старт: первая строка, где SNR > порога старта.
-        - Порог завершения: SNR в момент старта + 3.
-        - Конец: первая строка после последнего значения >= порога завершения,
-          где SNR < порога завершения.
+    Методы:
+        - __init__: инициализация анализатора.
+        - extract_pass_params: парсит заголовок лога и возвращает параметры пролета.
+        - parse_lines: парсит строки измерений и возвращает таблицу значений.
+        - extract_snr_metrics: извлекает SNR-метрики и окно приема.
+        - analyze_passes: анализирует список пролетов и заполняет SatPas.
     """
 
     # Инициализация анализатора
@@ -103,8 +104,6 @@ class PassAnalyzer:
 
                         location = (lat, lon)
 
-                        self.logger.debug(f"Location: {location}")  
-
                     except (ValueError, IndexError) as exc:
                         self.logger.debug(f"Error: {exc}")
                         location = None
@@ -112,7 +111,7 @@ class PassAnalyzer:
                 else:
                     self.logger.debug(f"Error: {len(tokens)}")
                     location = None
-                    self.logger.debug(f"Location: {location}")
+
 
             # извлекаем время окончания приема
             elif line.startswith("#Closed at:"):
@@ -158,6 +157,7 @@ class PassAnalyzer:
         headers = None
         rows = []
         in_records = False
+        base_date = None
 
         for line in log_lines:
             # Убираем переводы строк и пробелы по краям.
@@ -170,6 +170,13 @@ class PassAnalyzer:
                 break
 
             if line.startswith("#"):
+                if line.startswith("#Start time:"):
+                    raw_value = line.split(":", 1)[1].strip()
+                    try:
+                        start_dt = datetime.fromisoformat(raw_value)
+                        base_date = start_dt.date().isoformat()
+                    except ValueError:
+                        base_date = None
                 if line.startswith("#Time"):
                     # Считываем заголовок таблицы и включаем режим чтения записей.
                     header_line = line[1:].strip()
@@ -192,9 +199,18 @@ class PassAnalyzer:
             else:
                 values = parts
 
+            if headers[0] == "Time" and values:
+                # Если в логе только время, добавляем дату из заголовка.
+                time_value = values[0]
+                if base_date and " " not in time_value and ":" in time_value:
+                    values[0] = f"{base_date} {time_value}"
+
             if len(values) != len(headers):
-                # Если число значений не совпадает с заголовком, строку пропускаем.
-                self.logger.warning(f"unexpected log line format: {line}")
+                # Если число значений меньше заголовка — пропускаем без предупреждения.
+                if len(values) < len(headers):
+                    self.logger.debug(f"skip short log line: {line}")
+                else:
+                    self.logger.warning(f"unexpected log line format: {line}")
                 continue
 
             numeric_values = []
@@ -380,8 +396,9 @@ class PassAnalyzer:
 
             # Проверка наличия лог-файла
             if not sat_pass.log_path:
-                raise FileNotFoundError("log file not found: log_path is empty")
-            else: 
+                self.logger.warning("log file not found: log_path is empty")
+                continue
+            else:
                 self.logger.debug("Путь к лог файлу найден:")
                 self.logger.debug(sat_pass.log_path)
 
@@ -403,7 +420,47 @@ class PassAnalyzer:
                 **self.extract_pass_params(lines),
                 **self.extract_snr_metrics(self.parse_lines(lines)),
             }
-            print(params)
+
+            # Fallback: вытаскиваем station/satellite из имени файла, если нет в заголовке.
+            if (not params.get("station") or not params.get("satellite")) and sat_pass.log_path:
+                base_name = os.path.basename(sat_pass.log_path)
+                station_from_name = None
+                satellite_from_name = None
+                if "__" in base_name:
+                    station_from_name, rest = base_name.split("__", 1)
+                else:
+                    rest = base_name
+                rest = rest.replace("_rec.log", "").replace(".log", "")
+                parts = rest.split("_")
+                if len(parts) >= 3:
+                    satellite_from_name = "_".join(parts[2:])
+                if not params.get("station") and station_from_name:
+                    params["station"] = station_from_name
+                if not params.get("satellite") and satellite_from_name:
+                    params["satellite"] = satellite_from_name.replace("_", " ")
+
+            # Fallback: вытаскиваем дату/время из имени файла, если нет в заголовке.
+            if (not params.get("pass_date") or not params.get("start_time")) and sat_pass.log_path:
+                base_name = os.path.basename(sat_pass.log_path)
+                if "__" in base_name:
+                    _, rest = base_name.split("__", 1)
+                else:
+                    rest = base_name
+                rest = rest.replace("_rec.log", "").replace(".log", "")
+                parts = rest.split("_")
+                if len(parts) >= 2:
+                    date_part = parts[0]
+                    time_part = parts[1]
+                    try:
+                        date_obj = datetime.strptime(date_part, "%Y%m%d").date()
+                        if not params.get("pass_date"):
+                            params["pass_date"] = date_obj.isoformat()
+                        if not params.get("start_time"):
+                            params["start_time"] = datetime.strptime(
+                                f"{date_part} {time_part}", "%Y%m%d %H%M%S"
+                            )
+                    except ValueError:
+                        pass
 
             sat_pass.pass_id = params["pass_id"]
             sat_pass.satellite_name = params["satellite"]
@@ -419,7 +476,23 @@ class PassAnalyzer:
             sat_pass.rx_end_time = params["rx_end_time"]
             sat_pass.success = params["success"]
 
-            print(sat_pass)
+            # Fallback: вытаскиваем дату/время из pass_id, если все еще нет.
+            if (sat_pass.pass_date is None or sat_pass.pass_start_time is None) and sat_pass.pass_id:
+                try:
+                    date_part, time_part, *_ = sat_pass.pass_id.split("_")
+                    if sat_pass.pass_date is None:
+                        sat_pass.pass_date = datetime.strptime(date_part, "%Y%m%d").date().isoformat()
+                    if sat_pass.pass_start_time is None:
+                        sat_pass.pass_start_time = datetime.strptime(
+                            f"{date_part} {time_part}", "%Y%m%d %H%M%S"
+                        )
+                except (ValueError, IndexError):
+                    pass
+
+            # Fallback: если есть pass_start_time, но нет pass_date.
+            if sat_pass.pass_date is None and isinstance(sat_pass.pass_start_time, datetime):
+                sat_pass.pass_date = sat_pass.pass_start_time.date().isoformat()
+
             result.append(sat_pass)
 
         return result
