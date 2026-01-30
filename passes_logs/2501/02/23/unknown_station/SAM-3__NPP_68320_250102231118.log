@@ -1,0 +1,61 @@
+Log version: 2
+Station: "SAM3-1"  Lat. 53:12N  Long. 50:10E
+Device type: UDR-210E
+Device ID: 021059DF
+App. version: 1.1.5.171, English
+
+Host name: ps
+IP address#01: 192.168.18.5
+IP address#02: 10.0.0.2
+User name: operator
+Domain: ps
+SID: S-1-5-21-1197831953-4036364324-219755104-1000
+
+Satellite: NPP
+Format: NPP
+Mod. type: QPSK
+Clock: 15.000 MHz
+Carrier: 7812.000
+Frame size: 1024
+BER base: 1.17E+5 (bit/s)
+
+LO freq: 7000.000
+Input freq.: 812.000 MHz
+
+Disk free space: 175.001 GiB
+1st byffer size: 64 MiB
+2nd byffer size: 1024 MiB
+
+Date: 2025-01-02
+Time: 23:11:18
+
+1 37849U 11061A   25002.23252325  .00000520  00000+0  26750-3 0  9992
+2 37849  98.7434 303.3840 0002088  60.6340 299.5044 14.19530919683109
+
+
+#Headers
+  No       Time    TC      Gain     L1     L2    Carrier     Clock    SNR  Sync Qual.    Frames       BER  BER(FEC)    Rate  B1.%   F.size   
+
+#Begin
+   0   23:11:19    70      0(A)     51    229        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6     0.0     0    0.000      
+   1   23:11:20    70      0(A)     52    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    15.8     0    0.000      
+   2   23:11:21    70      0(A)     52    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    15.0     0    0.000      
+   3   23:11:22    70      0(A)     52    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+   4   23:11:23    70      0(A)     52    231        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    15.1     0    0.000      
+   5   23:11:24    70      0(A)     53    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+   6   23:11:25    70      0(A)     53    231        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+   7   23:11:26    70      0(A)     53    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    15.0     0    0.000      
+   8   23:11:27    70      0(A)     53    231        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+   9   23:11:28    70      0(A)     53    231        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    15.0     0    0.000      
+  10   23:11:29    70      0(A)     53    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+  11   23:11:30    70      0(A)     53    230        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+  12   23:11:31    70      0(A)     52    229        N/D       N/D    0.0    No   Low         0       N/D   4.56E+6    15.1     0    0.000      
+  13   23:11:32    70      0(A)     52    230        N/D       N/D    0.0    No   Low         0       N/D   4.56E+6    14.9     0    0.000      
+  14   23:11:33    70      0(A)     52    228        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    15.1     0    0.000      
+  15   23:11:34    70      0(A)     52    229        N/D       N/D    0.0    No   Low         0       N/D   4.56E+6    14.9     0    0.000      
+  16   23:11:35    70      0(A)     52    229        N/D       N/D    0.0    No   Low         0       N/D   4.56E+6    14.9     0    0.000      
+  17   23:11:36    70      0(A)     52    228        N/D       N/D    0.0    No   Low         0       N/D   4.56E+6    15.0     0    0.000      
+  18   23:11:37    70      0(A)     52    229        N/D       N/D    0.0    No   Low         0       N/D   4.55E+6    14.9     0    0.000      
+#End
+
+Ingestion terminated: scheduled time is over (exit code 3)

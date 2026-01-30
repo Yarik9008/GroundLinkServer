@@ -1,0 +1,17 @@
+#Pass ID: 20260120_133351_AQUA
+#Satellite: AQUA
+#Configuration: AQUA
+#almurnet v.1.7.20240730
+#Start time: 2026-01-20 13:33:51
+
+#Version: 2.2.20231116
+#Station: R2.0S-dem200
+#Location: 37.641188 lon 55.676863 lat
+#TLE: 1 27424U 02022A   26019.95447505  .00001296  00000+0  26931-3 0  9993
+#TLE: 2 27424  98.4091 346.4652 0001983  72.1988 359.6274 14.61832814261618
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-20 13:33:51.367000	device inactive
+
+#Closed at: 2026-01-20 13:33:52
+#Recorded file [0 MB]: 

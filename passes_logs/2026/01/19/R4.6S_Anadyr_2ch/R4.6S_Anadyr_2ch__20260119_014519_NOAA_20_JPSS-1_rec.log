@@ -1,0 +1,17 @@
+#Pass ID: 20260119_014519_NOAA 20 (JPSS-1)
+#Satellite: NOAA 20 (JPSS-1)
+#Configuration: NOAA 20
+#almurnet v.1.7.20251203
+#Start time: 2026-01-19 01:49:36
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 43013U 17073A   25350.93759711  .00000080  00000+0  58734-4 0  9994
+#TLE: 2 43013  98.7603 287.1885 0002156  81.1496 278.9924 14.19526878418610
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-19 01:49:36.354000	device inactive
+
+#Closed at: 2026-01-19 01:49:37
+#Recorded file [0 MB]: D:/lorett/data/35034_260119_044936.dat

@@ -8,39 +8,3 @@ env/
 venv/
 ENV/
 .venv
-
-# Logs
-*.log
-logs/
-lorett_monitor.log
-
-# Reports and graphs
-report/
-*.png
-report/**/*.md
-
-# Configuration (contains sensitive data)
-config.json
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Systemd service (system-specific)
-*.service
-
-# Received images
-received_images/
-
-# SSH host key generated at runtime
-ssh_host_rsa_key
-ssh_host_key
-ssh_host_*
-uploads/

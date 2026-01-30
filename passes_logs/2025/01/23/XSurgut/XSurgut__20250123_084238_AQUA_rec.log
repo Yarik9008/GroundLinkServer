@@ -1,0 +1,9 @@
+#Pass ID: 20250123_084238_AQUA
+#Satellite: AQUA
+#Configuration: AQUA
+#Start time: 2025-01-23 09:20:42
+
+#Time	Level	Level2	SNR	BER	Gain	Gain2
+09:20:44.10	-38.2	-50.2	3.4	7610931	93	2014
+
+#Closed at: 2025-01-23 09:20:44

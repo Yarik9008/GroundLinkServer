@@ -1,0 +1,17 @@
+#Pass ID: 20260122_124149_NOAA 20 (JPSS-1)
+#Satellite: NOAA 20 (JPSS-1)
+#Configuration: NOAA 20
+#almurnet v.1.7.20251203
+#Start time: 2026-01-22 12:50:22
+
+#Version: 2.2.20231116
+#Station: R3.2S_Murmansk
+#Location: 33.079688 lon 68.888172 lat
+#TLE: 1 43013U 17073A   26021.46221703  .00000173  00000+0  10299-3 0  9999
+#TLE: 2 43013  98.7644 322.3335 0001238  29.7597 330.3649 14.19538314423652
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-22 12:50:22.039000	device inactive
+
+#Closed at: 2026-01-22 12:50:23
+#Recorded file [0 MB]: D:/lorett/data/31041_260122_155021.dat

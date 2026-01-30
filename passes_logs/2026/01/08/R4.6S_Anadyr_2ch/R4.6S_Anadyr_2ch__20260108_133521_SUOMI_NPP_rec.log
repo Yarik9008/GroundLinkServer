@@ -1,0 +1,17 @@
+#Pass ID: 20260108_133521_SUOMI NPP
+#Satellite: SUOMI NPP
+#Configuration: NPP
+#almurnet v.1.7.20251203
+#Start time: 2026-01-08 13:35:24
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 37849U 11061A   25350.92281687  .00000071  00000+0  54882-4 0  9996
+#TLE: 2 37849  98.7777 288.2268 0002366 112.8570 247.2856 14.19515404732588
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-08 13:35:24.203000	device inactive
+
+#Closed at: 2026-01-08 13:35:25
+#Recorded file [0 MB]: D:/lorett/data/35034_260108_163524.dat

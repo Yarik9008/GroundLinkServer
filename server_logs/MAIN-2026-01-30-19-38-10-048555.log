@@ -1,0 +1,19 @@
+2026-01-30 19:38:10,049 : INFO : MAIN : Start logging
+2026-01-30 19:38:19,840 : INFO : MAIN : logs download time: station=PlanumMoscow time=0.07s
+2026-01-30 19:38:19,846 : INFO : MAIN : logs download time: station=R2.0S-dem200 time=0.01s
+2026-01-30 19:38:19,972 : INFO : MAIN : logs download time: station=R2M6_AANII_01 time=0.13s
+2026-01-30 19:39:04,815 : INFO : MAIN : logs download time: station=R3.0SM8_Murmansk_STILSPACE time=44.84s
+2026-01-30 19:39:04,821 : INFO : MAIN : logs download time: station=R3.2S_Murmansk_2ch time=0.01s
+2026-01-30 19:39:05,092 : INFO : MAIN : logs download time: station=R4.6S_Anadyr_2ch time=0.27s
+2026-01-30 19:39:05,116 : INFO : MAIN : logs download time: station=Regia time=0.02s
+2026-01-30 19:39:05,131 : INFO : MAIN : logs download time: station=XPeterburg time=0.02s
+2026-01-30 19:39:05,146 : INFO : MAIN : logs download time: station=X_Chapaevo_01 time=0.02s
+2026-01-30 19:39:05,157 : INFO : MAIN : logs download time: station=Xkaliningrad time=0.01s
+2026-01-30 19:39:05,207 : INFO : MAIN : logs download time: station=planumMaritime01 time=0.05s
+2026-01-30 19:39:05,327 : INFO : MAIN : logs download time: station=R2.0S_Moscow time=0.12s
+2026-01-30 19:39:05,331 : INFO : MAIN : logs download time: station=R2.0S_Raduga time=0.00s
+2026-01-30 19:39:05,367 : INFO : MAIN : logs download time: station=R3.2S-Naryan-Mar time=0.04s
+2026-01-30 19:39:05,534 : INFO : MAIN : logs download time: station=R3.2S_Murmansk time=0.17s
+2026-01-30 19:39:05,667 : INFO : MAIN : logs download time: station=R4.6S_Anadyr time=0.13s
+2026-01-30 19:39:05,795 : INFO : MAIN : logs download time: station=T1 time=0.13s
+2026-01-30 19:39:30,615 : INFO : MAIN : batch insert complete: inserted=13

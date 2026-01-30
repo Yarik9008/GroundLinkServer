@@ -1,0 +1,17 @@
+#Pass ID: 20260117_084159_TY-40
+#Satellite: TY-40
+#Configuration: TY-39
+#almurnet v.1.7.20240730
+#Start time: 2026-01-17 08:41:59
+
+#Version: 2.2.20231116
+#Station: R2.0S-dem200
+#Location: 37.641188 lon 55.676863 lat
+#TLE: 1 56846U 23081A   26016.61953149  .00002313  00000-0  10506-3 0  9990
+#TLE: 2 56846  97.3892  89.5057 0001765  75.2099 284.9333 15.21769873144958
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-17 08:41:59.796000	device inactive
+
+#Closed at: 2026-01-17 08:42:00
+#Recorded file [0 MB]: 

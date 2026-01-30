@@ -1,0 +1,17 @@
+#Pass ID: 20260111_033302_NOAA 21 (JPSS-2)
+#Satellite: NOAA 21 (JPSS-2)
+#Configuration: NOAA-21
+#almurnet v.1.7.20240730
+#Start time: 2026-01-11 03:33:01
+
+#Version: 2.2.20231116
+#Station: X_Chapaevo_01
+#Location: 129.39018 lon 61.66317 lat
+#TLE: 1 54234U 22150A   26009.79679979  .00000100  00000+0  68070-4 0  9993
+#TLE: 2 54234  98.7494 310.7596 0000833 322.2782  37.8335 14.19533646164071
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-11 03:33:01.841000	device inactive
+
+#Closed at: 2026-01-11 03:33:02
+#Recorded file [0 MB]: 

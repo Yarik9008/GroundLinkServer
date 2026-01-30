@@ -1,0 +1,17 @@
+#Pass ID: 20260117_032719_2024-110A
+#Satellite: 2024-110A
+#Configuration: 01B_900M
+#almurnet v.1.7.20251203
+#Start time: 2026-01-17 03:36:25
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 60012U 24110A   25350.99406016  .00007065  00000+0  43427-3 0  9997
+#TLE: 2 60012  97.5780  79.2982 0009920 155.4253 204.7451 15.10324029 84382
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-17 03:36:25.825000	device inactive
+
+#Closed at: 2026-01-17 03:36:26
+#Recorded file [0 MB]: D:/lorett/data/35034_260117_063625.dat

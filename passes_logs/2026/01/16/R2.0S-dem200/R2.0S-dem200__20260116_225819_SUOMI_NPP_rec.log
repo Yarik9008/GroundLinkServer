@@ -1,0 +1,17 @@
+#Pass ID: 20260116_225819_SUOMI NPP
+#Satellite: SUOMI NPP
+#Configuration: NPP
+#almurnet v.1.7.20240730
+#Start time: 2026-01-16 22:58:18
+
+#Version: 2.2.20231116
+#Station: R2.0S-dem200
+#Location: 37.641188 lon 55.676863 lat
+#TLE: 1 37849U 11061A   26016.23176763  .00000061  00000+0  49926-4 0  9990
+#TLE: 2 37849  98.7812 318.2698 0002434  61.5135 298.6286 14.19525545736883
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-16 22:58:18.249000	device inactive
+
+#Closed at: 2026-01-16 22:58:19
+#Recorded file [0 MB]: 

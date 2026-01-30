@@ -1,0 +1,17 @@
+#Pass ID: 20260116_214000_NOAA 20 (JPSS-1)
+#Satellite: NOAA 20 (JPSS-1)
+#Configuration: NOAA 20
+#almurnet v.1.7.20240730
+#Start time: 2026-01-16 21:39:58
+
+#Version: 2.2.20231116
+#Station: R2.0S-dem200
+#Location: 37.641188 lon 55.676863 lat
+#TLE: 1 43013U 17073A   26016.24631778  .00000038  00000+0  39093-4 0  9990
+#TLE: 2 43013  98.7637 317.1726 0001455  37.6755 322.4523 14.19536243422915
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-16 21:39:58.605000	device inactive
+
+#Closed at: 2026-01-16 21:39:59
+#Recorded file [0 MB]: 

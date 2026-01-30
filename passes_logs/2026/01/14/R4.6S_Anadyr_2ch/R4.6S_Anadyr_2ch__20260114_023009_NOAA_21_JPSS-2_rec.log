@@ -1,0 +1,17 @@
+#Pass ID: 20260114_023009_NOAA 21 (JPSS-2)
+#Satellite: NOAA 21 (JPSS-2)
+#Configuration: NOAA-21
+#almurnet v.1.7.20251203
+#Start time: 2026-01-14 02:36:58
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 54234U 22150A   25350.97269056  .00000057  00000+0  47676-4 0  9992
+#TLE: 2 54234  98.7466 287.2282 0002043  29.8355 330.2937 14.19525482160692
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-14 02:36:58.129000	device inactive
+
+#Closed at: 2026-01-14 02:36:59
+#Recorded file [0 MB]: D:/lorett/data/35034_260114_053658.dat

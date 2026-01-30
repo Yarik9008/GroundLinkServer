@@ -1,0 +1,17 @@
+#Pass ID: 20260128_090348_NOAA 20 (JPSS-1)
+#Satellite: NOAA 20 (JPSS-1)
+#Configuration: NOAA 20
+#almurnet v.1.7.20240730
+#Start time: 2026-01-28 09:06:36
+
+#Version: 2.2.20231116
+#Station: R3.2S-Naryan-Mar
+#Location: 53.008057 lon 67.646978 lat
+#TLE: 1 43013U 17073A   26027.80586608  .00000156  00000+0  94940-4 0  9998
+#TLE: 2 43013  98.7647 328.6108 0000947  21.3465 338.7750 14.19541216424550
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-28 09:06:36.258000	device inactive
+
+#Closed at: 2026-01-28 09:06:37
+#Recorded file [0 MB]: D:/Data/35015_260128_120636.dat

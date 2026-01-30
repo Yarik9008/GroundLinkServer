@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import asyncio
 import aiohttp
 import shutil
@@ -458,6 +459,8 @@ class EusLogDownloader:
         sem: asyncio.Semaphore,
         view_url_or_filename: str,
         out_dir: str,
+        *,
+        retries: int,
         ) -> str:
         """Рендерит страницу пролета и сохраняет PNG-график.
 
@@ -488,107 +491,87 @@ class EusLogDownloader:
         # строим полный URL для графика
         view_url = self._normalize_view_url(view_url_or_filename)
         self.logger.debug(f"graph download start: {view_url} -> {path}")
-        # запускаем асинхронное скачивание графика
-        async with sem:
-            try:
-                # используем playwright для рендера графика
+        last_err: Optional[BaseException] = None
+        for attempt in range(retries + 1):
+            async with sem:
                 try:
                     # используем playwright для рендера графика
-                    from playwright.async_api import async_playwright
-                    # запускаем асинхронное скачивание графика
-                    async with async_playwright() as p:
-                        # запускаем браузер
-                        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-                        # создаем новую страницу
-                        page = await browser.new_page()
-                        # переходим на страницу
-                        await page.goto(view_url, wait_until="networkidle", timeout=30000)
-                        # устанавливаем размер viewport
-                        await page.set_viewport_size(
+                    try:
+                        from playwright.async_api import async_playwright
+                        async with async_playwright() as p:
+                            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+                            page = await browser.new_page()
+                            await page.goto(view_url, wait_until="networkidle", timeout=30000)
+                            await page.set_viewport_size(
+                                {"width": self.graph_viewport_width, "height": self.graph_viewport_height}
+                            )
+                            await asyncio.sleep(self.graph_load_delay)
+                            if self.graph_scroll_x > 0 or self.graph_scroll_y > 0:
+                                await page.evaluate(f"window.scrollTo({self.graph_scroll_x}, {self.graph_scroll_y})")
+                                await asyncio.sleep(0.2)
+                            await page.screenshot(path=path, full_page=False)
+                            await browser.close()
+                        self.logger.debug(f"graph saved: {path}")
+                        return path
+                    except ImportError:
+                        from pyppeteer import launch
+
+                        os.environ["PYPPETEER_SKIP_CHROMIUM_DOWNLOAD"] = "1"
+                        chrome_paths = [
+                          r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                            os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+                            r"C:\Program Files\Chromium\Application\chrome.exe",
+                        ]
+                        executable_path = None
+                        for chrome_path in chrome_paths:
+                            if os.path.exists(chrome_path):
+                                executable_path = chrome_path
+                                break
+                        if not executable_path:
+                            raise RuntimeError(
+                                "Chrome/Chromium not found. Install Chrome or use: "
+                                "pip install playwright && playwright install chromium"
+                            )
+                        user_data_dir = tempfile.mkdtemp(prefix="pyppeteer_user_data_")
+                        browser = await launch(
+                            {
+                                "executablePath": executable_path,
+                                "userDataDir": user_data_dir,
+                                "autoClose": False,
+                                "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                            }
+                        )
+                        self._register_child_process(browser.process)
+                        page = await browser.newPage()
+                        await page.goto(view_url, waitUntil="networkidle0", timeout=30000)
+                        await page.setViewport(
                             {"width": self.graph_viewport_width, "height": self.graph_viewport_height}
                         )
-                        # ждем загрузки графика
                         await asyncio.sleep(self.graph_load_delay)
-                        # если скролл по x или y больше 0, то скроллим страницу
                         if self.graph_scroll_x > 0 or self.graph_scroll_y > 0:
                             await page.evaluate(f"window.scrollTo({self.graph_scroll_x}, {self.graph_scroll_y})")
                             await asyncio.sleep(0.2)
-                        await page.screenshot(path=path, full_page=False)
-                        # закрываем браузер
-                        await browser.close()
-                        # сохраняем график
-                    self.logger.debug(f"graph saved: {path}")
-                    return path
-                except ImportError:
-                    from pyppeteer import launch
+                        await page.screenshot({"path": path, "fullPage": False})
+                        try:
+                            await browser.close()
+                        except OSError as e:
+                            self.logger.warning(f"pyppeteer close failed: {e}")
+                        finally:
+                            self._unregister_child_process(browser.process)
+                            shutil.rmtree(user_data_dir, ignore_errors=True)
+                        self.logger.info(f"graph saved: {path}")
+                        return path
+                except Exception as e:
+                    last_err = e
+                    if attempt < retries:
+                        await asyncio.sleep(0.3 * (2 ** attempt))
 
-                    os.environ["PYPPETEER_SKIP_CHROMIUM_DOWNLOAD"] = "1"
-                    chrome_paths = [
-                      r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                        os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-                        r"C:\Program Files\Chromium\Application\chrome.exe",
-                    ]
-                    executable_path = None
-                    # ищем путь к браузеру
-                    for chrome_path in chrome_paths:
-                        # если браузер найден, то устанавливаем путь
-                        if os.path.exists(chrome_path):
-                            executable_path = chrome_path
-                            break
-                    if not executable_path:
-                        # если браузер не найден, то выбрасываем исключение
-                        raise RuntimeError(
-                            "Chrome/Chromium not found. Install Chrome or use: "
-                            "pip install playwright && playwright install chromium"
-                        )
-                    user_data_dir = tempfile.mkdtemp(prefix="pyppeteer_user_data_")
-                    # запускаем браузер
-                    browser = await launch(
-                        {
-                            "executablePath": executable_path,
-                            "userDataDir": user_data_dir,
-                            "autoClose": False,
-                            "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-                        }
-                    )
-                    self._register_child_process(browser.process)
-                    # создаем новую страницу
-                    page = await browser.newPage()
-                    # переходим на страницу
-                    await page.goto(view_url, waitUntil="networkidle0", timeout=30000)
-                    # устанавливаем размер viewport
-                    await page.setViewport(
-                        {"width": self.graph_viewport_width, "height": self.graph_viewport_height}
-                    )
-                    # ждем загрузки графика
-                    await asyncio.sleep(self.graph_load_delay)
-                    # если скролл по x или y больше 0, то скроллим страницу
-                    if self.graph_scroll_x > 0 or self.graph_scroll_y > 0:
-                        await page.evaluate(f"window.scrollTo({self.graph_scroll_x}, {self.graph_scroll_y})")
-                        await asyncio.sleep(0.2)
-                    await page.screenshot({"path": path, "fullPage": False})
-                    # закрываем браузер
-                    try:
-                        await browser.close()
-                    except OSError as e:
-                        # если закрывание браузера не удалось, то выводим предупреждение
-                        self.logger.warning(f"pyppeteer close failed: {e}")
-                    finally:
-                        # удаляем процесс браузера
-                        self._unregister_child_process(browser.process)
-                        # удаляем каталог с пользовательскими данными
-                        shutil.rmtree(user_data_dir, ignore_errors=True)
-                    # сохраняем график
-                    self.logger.info(f"graph saved: {path}")
-                    return path
-            except Exception as e:
-                # если скачивание графика не удалось, то выводим исключение
-                self.logger.exception(f"graph download failed: {view_url}", exc_info=e)
-                return e
+        self.logger.exception(f"graph download failed: {view_url}", exc_info=last_err)
+        return last_err
 
     # Скачивает несколько графиков параллельно (async).
-    async def _download_graphs_async(self, tasks: list, max_parallel: int = 5) -> list:
+    async def _download_graphs_async(self, tasks: list, max_parallel: int = 5, retries: int = 2) -> list:
         """Параллельно скачивает список графиков и возвращает результаты.
 
         Args:
@@ -603,11 +586,11 @@ class EusLogDownloader:
         # создаем список задач для скачивания графиков
         download_tasks = []
         for view_url, out_dir in tasks:
-            download_tasks.append(self._download_single_graph(sem, view_url, out_dir))
+            download_tasks.append(self._download_single_graph(sem, view_url, out_dir, retries=retries))
         return await asyncio.gather(*download_tasks, return_exceptions=True)
 
     # Получение текста страницы
-    def _load_html(self, url: str, params: Optional[Tuple[datetime, datetime]] = None) -> str:
+    def _load_html(self, url: str, params: Optional[Tuple[datetime, datetime]] = None, retries: int = 2) -> Optional[str]:
         """Получает HTML по URL с параметрами диапазона дат (если заданы).
 
         Args:
@@ -633,15 +616,27 @@ class EusLogDownloader:
         if query:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}{query}"
-        # загружаем HTML по URL
-        self.logger.debug( f"load url: {url}")
-        with urlopen(url, timeout=3600) as r:
-            text = r.read().decode("utf-8", errors="replace")
-        # выводим информацию о загрузке
-        self.logger.debug( f"load done: {url} bytes={len(text)}")
-        self.logger.debug( f"html: {text}")
-
-        return text
+        # загружаем HTML по URL с ретраями
+        self.logger.debug(f"load url: {url}")
+        last_err: Optional[BaseException] = None
+        for attempt in range(retries + 1):
+            try:
+                with urlopen(url, timeout=3600) as r:
+                    text = r.read().decode("utf-8", errors="replace")
+                # выводим информацию о загрузке
+                self.logger.debug(f"load done: {url} bytes={len(text)}")
+                self.logger.debug(f"html: {text}")
+                return text
+            except Exception as exc:
+                last_err = exc
+                if attempt < retries:
+                    self.logger.warning(
+                        f"load html failed (attempt {attempt + 1}/{retries + 1}): {exc}"
+                    )
+                    time.sleep(0.5 * (2 ** attempt))
+                else:
+                    self.logger.exception(f"load html failed: {url}", exc_info=exc)
+        return None
 
     # Загрузка и парсинг страницы
     def load_html_and_parse(
@@ -674,6 +669,7 @@ class EusLogDownloader:
 
         if params is None:
             ranges = [None]
+            self.logger.info("load_html_and_parse: params=None")
         else:
             start_dt, end_dt = params
             if not isinstance(start_dt, datetime) or not isinstance(end_dt, datetime):
@@ -682,11 +678,28 @@ class EusLogDownloader:
                 ranges = list(iter_month_ranges(start_dt, end_dt))
             else:
                 ranges = [params]
+            self.logger.info(
+                f"load_html_and_parse: start={start_dt.isoformat()} end={end_dt.isoformat()} "
+                f"months={len(ranges)}"
+            )
 
         for range_params in ranges:
             for url in self.urls:
                 # загружаем HTML по URL
+                t0 = time.perf_counter()
                 html = self._load_html(url, params=range_params)
+                if not html:
+                    self.logger.warning(f"skip parse: empty html for url={url}")
+                    continue
+                elapsed = time.perf_counter() - t0
+                if range_params is None:
+                    range_info = "range=None"
+                else:
+                    rs, re = range_params
+                    range_info = f"range={rs.date().isoformat()}..{(re - timedelta(days=1)).date().isoformat()}"
+                self.logger.info(
+                    f"html loaded: url={url} {range_info} bytes={len(html)} time={elapsed:.2f}s"
+                )
                 # Собираем станции в порядке на странице и ссылки на пролеты по станциям.
                 self.logger.debug(f"parse page: base_url={url}, html_size={len(html)}")
                 local = []
@@ -890,7 +903,8 @@ class EusLogDownloader:
     def download_graphs_file(self, 
         passes_to_download: list,
         out_dir: str,
-        max_parallel: int = 10
+        max_parallel: int = 10,
+        retries: int = 2,
         ) -> list:
 
         """Скачивает PNG-графики и раскладывает их по датам и станциям.
@@ -952,7 +966,11 @@ class EusLogDownloader:
         if tasks:
             # запускаем асинхронное скачивание графиков
             results = asyncio.run(
-                self._download_graphs_async([(url, dir_path) for _, url, dir_path in tasks], max_parallel=max_parallel)
+                self._download_graphs_async(
+                    [(url, dir_path) for _, url, dir_path in tasks],
+                    max_parallel=max_parallel,
+                    retries=retries,
+                )
             )
             for (index, _, _), result in zip(tasks, results): # скачиваем графики
                 if isinstance(result, Exception):
@@ -966,7 +984,7 @@ class EusLogDownloader:
 if __name__ == "__main__":
 
     # Логгер пишет в файл и консоль; уровень debug нужен для подробных трассировок.
-    logger = Logger(path_log="eus_downloader", log_level="debug")
+    logger = Logger(path_log="", log_level="info")
 
     # Инициализируем портал с логгером.
     portal = EusLogDownloader(logger=logger)
@@ -982,17 +1000,18 @@ if __name__ == "__main__":
 
     # Тест load_and_parse: собираем станции и ссылки на пролеты.
     page_passes = portal.load_html_and_parse(params=params)
-    portal.logger.info(f"stations in page: {len(page_passes)}")
-    portal.logger.debug(f"page_passes: {page_passes}")
+    portal.logger.info(f"Количество станций: {len(page_passes)}")
 
-    # Тест get_station_list: сортированный список станций.
-    station_list = portal.get_station_list(page_passes)
-    portal.logger.info(f"station_list ok: {len(station_list)}")
+    # # Тест get_station_list: сортированный список станций.
+    # station_list = portal.get_station_list(page_passes)
+    # portal.logger.info(f"Список станций: {len(station_list)}")
 
-    # Тест get_passes: ссылки на пролеты для первой станции.
-    for station in station_list:
-        passes = portal.get_passes(page_passes, station)
-        portal.logger.info(f"passes for {station}: {len(passes)}")
+    print(page_passes)
+    for station in page_passes.keys():
+        passes = page_passes[station]
+
+        print(f"passes for {station}: {len(passes)}")
+        
         if passes:
             results = portal.download_logs_file(
                 passes,
@@ -1003,8 +1022,7 @@ if __name__ == "__main__":
             portal.logger.info(f"download_logs_file for {station}: ok={ok}, fail={fail}")
         else:
             portal.logger.warning(f"no passes for {station}")
-    else:
-        portal.logger.warning("no stations found")
+
 
     # # Тест download_graphs_file:
     # if station_list:

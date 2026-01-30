@@ -1,0 +1,17 @@
+#Pass ID: 20260108_055929_FENGYUN 3D
+#Satellite: FENGYUN 3D
+#Configuration: FENGYUN 3D
+#almurnet v.1.7.20240730
+#Start time: 2026-01-08 05:59:29
+
+#Version: 2.2.20231116
+#Station: X_Chapaevo_01
+#Location: 129.39018 lon 61.66317 lat
+#TLE: 1 43010U 17072A   26006.26440730  .00000376  00000+0  19957-3 0  9994
+#TLE: 2 43010  98.9925 337.9455 0002045 123.9195 236.2175 14.19693586422016
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-08 05:59:29.694000	device inactive
+
+#Closed at: 2026-01-08 05:59:30
+#Recorded file [0 MB]: 

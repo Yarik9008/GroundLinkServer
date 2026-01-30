@@ -1,0 +1,17 @@
+#Pass ID: 20260124_005328_FENGYUN 3E
+#Satellite: FENGYUN 3E
+#Configuration: FENGYUN 3E
+#almurnet v.1.7.20251203
+#Start time: 2026-01-24 00:59:41
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 49008U 21062A   25350.97288215  .00000176  00000+0  10353-3 0  9997
+#TLE: 2 49008  98.7477 351.4440 0000638 234.3856 125.7261 14.19881381230726
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-24 00:59:41.768000	device inactive
+
+#Closed at: 2026-01-24 00:59:42
+#Recorded file [0 MB]: 

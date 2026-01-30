@@ -30,6 +30,7 @@ class DbManager:
         - get_daily_success_stats: статистика успешности за день.
         - get_daily_station_stats: статистика по станциям за день.
         - get_max_snr_sum_passes: пролет с max snr_sum по станции за день.
+        - get_failed_graphs_by_station: графики пустых пролетов по станциям за день.
     """
 
     def __init__(
@@ -162,6 +163,16 @@ class DbManager:
         # если значение является строкой, то возвращает строку
         return str(value)
 
+    # Округляет вещественные числа до 2 знаков.
+    def _round2(self, value: Optional[float]) -> Optional[float]:
+        """Округляет значение до 2 знаков, если оно задано."""
+        if value is None:
+            return None
+        try:
+            return round(float(value), 2)
+        except (TypeError, ValueError):
+            return None
+
     # Приводит время к строке.
     def _normalize_time(self, value: time | datetime | str | None) -> Optional[str]:
         """Приводит время к строке."""
@@ -281,9 +292,9 @@ class DbManager:
                     self._combine_date_time(sat_pass.pass_date, sat_pass.pass_end_time),
                     self._combine_date_time(sat_pass.pass_date, sat_pass.rx_start_time),
                     self._combine_date_time(sat_pass.pass_date, sat_pass.rx_end_time),
-                    sat_pass.snr_awg,
-                    sat_pass.snr_max,
-                    sat_pass.snr_sum,
+                    self._round2(sat_pass.snr_awg),
+                    self._round2(sat_pass.snr_max),
+                    self._round2(sat_pass.snr_sum),
                     sat_pass.log_url,
                     sat_pass.log_path,
                     sat_pass.graph_url,
@@ -343,9 +354,9 @@ class DbManager:
                         self._combine_date_time(sat_pass.pass_date, sat_pass.pass_end_time),
                         self._combine_date_time(sat_pass.pass_date, sat_pass.rx_start_time),
                         self._combine_date_time(sat_pass.pass_date, sat_pass.rx_end_time),
-                        sat_pass.snr_awg,
-                        sat_pass.snr_max,
-                        sat_pass.snr_sum,
+                        self._round2(sat_pass.snr_awg),
+                        self._round2(sat_pass.snr_max),
+                        self._round2(sat_pass.snr_sum),
                         sat_pass.log_url,
                         sat_pass.log_path,
                         sat_pass.graph_url,
@@ -409,7 +420,7 @@ class DbManager:
                         total_inc,
                         success_inc,
                         failed_inc,
-                        (failed_inc * 100.0) / total_inc if total_inc else 0.0,
+                        self._round2((failed_inc * 100.0) / total_inc) if total_inc else 0.0,
                         None,
                         total_inc,
                         success_inc,
@@ -463,7 +474,7 @@ class DbManager:
                 total_inc,
                 success_inc,
                 failed_inc,
-                (failed_inc * 100.0) / total_inc if total_inc else 0.0,
+                self._round2((failed_inc * 100.0) / total_inc) if total_inc else 0.0,
                 None,
                 total_inc,
                 success_inc,
@@ -649,6 +660,28 @@ class DbManager:
                 success=bool(row["success"]),
             )
             result.append(sat_pass)
+        return result
+
+    # Возвращает ссылки на графики пустых пролетов по станциям за день.
+    def get_failed_graphs_by_station(self, stat_day: date | datetime | str) -> dict[str, list[str]]:
+        """Возвращает графики пустых пролетов по станциям за день."""
+        day_value = self._normalize_date(stat_day)
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT station_name, graph_url
+            FROM all_passes
+            WHERE pass_date = ?
+              AND success = 0
+              AND graph_url IS NOT NULL
+              AND graph_url != ''
+            ORDER BY station_name, pass_start_time
+            """,
+            (day_value,),
+        ).fetchall()
+        result: dict[str, list[str]] = {}
+        for station_name, graph_url in rows:
+            result.setdefault(station_name, []).append(graph_url)
         return result
 
 

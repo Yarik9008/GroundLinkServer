@@ -1,0 +1,17 @@
+#Pass ID: 20260119_045229_AQUA
+#Satellite: AQUA
+#Configuration: AQUA
+#almurnet v.1.7.20240730
+#Start time: 2026-01-19 04:52:28
+
+#Version: 2.2.20231116
+#Station: R3.0SM8_Murmansk_STILSPACE
+#Location: 33.092731 lon 68.902999 lat
+#TLE: 1 27424U 02022A   26017.96925465  .00000866  00000+0  18326-3 0  9999
+#TLE: 2 27424  98.4087 344.4465 0002004  74.6027 356.0068 14.61826972261327
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-19 04:52:28.405000	device inactive
+
+#Closed at: 2026-01-19 04:52:29
+#Recorded file [0 MB]: 

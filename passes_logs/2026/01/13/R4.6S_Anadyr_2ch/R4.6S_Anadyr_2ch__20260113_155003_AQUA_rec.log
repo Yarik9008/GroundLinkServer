@@ -1,0 +1,17 @@
+#Pass ID: 20260113_155003_AQUA
+#Satellite: AQUA
+#Configuration: AQUA
+#almurnet v.1.7.20251203
+#Start time: 2026-01-13 15:58:07
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 27424U 02022A   25351.00450321  .00000925  00000+0  19503-3 0  9992
+#TLE: 2 27424  98.4041 311.9529 0001248 113.7180 322.1616 14.61819266256652
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-13 15:58:07.973000	device inactive
+
+#Closed at: 2026-01-13 15:58:08
+#Recorded file [0 MB]: D:/lorett/data/35034_260113_185807.dat

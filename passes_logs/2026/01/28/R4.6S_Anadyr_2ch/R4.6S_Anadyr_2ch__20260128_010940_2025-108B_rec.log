@@ -1,0 +1,17 @@
+#Pass ID: 20260128_010940_2025-108B
+#Satellite: 2025-108B
+#Configuration: 3PB_600M
+#almurnet v.1.7.20251203
+#Start time: 2026-01-28 01:09:42
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 64088U 25108B   25351.01672131  .00008460  00000+0  43413-3 0  9994
+#TLE: 2 64088  97.4940  63.8579 0011684 285.1423  74.8517 15.16717580 31720
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-28 01:09:42.240000	device inactive
+
+#Closed at: 2026-01-28 01:09:43
+#Recorded file [0 MB]: 

@@ -1,0 +1,68 @@
+Log version: 2
+Station: "SAM3-1"  Lat. 53:12N  Long. 50:10E
+Device type: UDR-210E
+Device ID: 021059DF
+App. version: 1.1.5.171, English
+
+Host name: ps
+IP address#01: 192.168.18.5
+IP address#02: 10.0.0.2
+User name: operator
+Domain: ps
+SID: S-1-5-21-1197831953-4036364324-219755104-1000
+
+Satellite: AQUA
+Format: AQUA-DB
+Mod. type: SQPSK
+Clock: 7.500 MHz
+Carrier: 8160.000
+Frame size: 1024
+BER base: 5.86E+4 (bit/s)
+
+LO freq: 7000.000
+Input freq.: 1160.000 MHz
+
+Disk free space: 187.805 GiB
+1st byffer size: 64 MiB
+2nd byffer size: 1024 MiB
+
+Date: 2025-01-02
+Time: 00:09:21
+
+1 27424U 02022A   25001.24287003  .00004141  00000+0  86120-3 0  9998
+2 27424  98.3575 317.7844 0001141 121.7774 330.6893 14.60607083205619
+
+
+#Headers
+  No       Time    TC      Gain     L1     L2    Carrier     Clock    SNR  Sync Qual.    Frames       BER  BER(FEC)    Rate  B1.%   F.size   
+
+#Begin
+   0   00:09:22    71      0(M)     72    231        N/D       N/D    0.0    No   Low         0       N/D       N/A     0.0     0    0.000      
+   1   00:09:23    71      0(A)     72    231        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.3     0    0.000      
+   2   00:09:24    71      0(A)     73    232        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+   3   00:09:25    71      0(A)     73    233        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+   4   00:09:26    71      0(A)     73    234        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.1     0    0.000      
+   5   00:09:27    71      0(A)     73    234        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+   6   00:09:28    71      0(A)     74    233        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.0     0    0.000      
+   7   00:09:29    71      0(A)     73    233        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+   8   00:09:30    71      0(A)     73    232        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+   9   00:09:31    71      0(A)     73    231        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.0     0    0.000      
+  10   00:09:32    71      0(A)     72    231        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  11   00:09:33    71      0(A)     72    230        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.1     0    0.000      
+  12   00:09:34    71      0(A)     71    229        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  13   00:09:35    71      0(A)     71    228        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  14   00:09:36    71      0(A)     70    228        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.0     0    0.000      
+  15   00:09:37    71      0(A)     70    227        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  16   00:09:38    71      0(A)     70    227        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.0     0    0.000      
+  17   00:09:39    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  18   00:09:40    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  19   00:09:41    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.1     0    0.000      
+  20   00:09:42    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  21   00:09:43    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.0     0    0.000      
+  22   00:09:44    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  23   00:09:45    71      0(A)     69    226        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+  24   00:09:46    71      0(A)     69    225        N/D       N/D    0.0    No   Low         0       N/D       N/A    15.0     0    0.000      
+  25   00:09:47    71      0(A)     70    227        N/D       N/D    0.0    No   Low         0       N/D       N/A    14.9     0    0.000      
+#End
+
+Ingestion terminated: scheduled time is over (exit code 3)

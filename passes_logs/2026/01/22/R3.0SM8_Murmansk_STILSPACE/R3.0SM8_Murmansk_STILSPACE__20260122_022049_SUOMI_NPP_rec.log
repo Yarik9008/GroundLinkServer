@@ -1,0 +1,17 @@
+#Pass ID: 20260122_022049_SUOMI NPP
+#Satellite: SUOMI NPP
+#Configuration: NPP
+#almurnet v.1.7.20240730
+#Start time: 2026-01-22 02:20:48
+
+#Version: 2.2.20231116
+#Station: R3.0SM8_Murmansk_STILSPACE
+#Location: 33.092731 lon 68.902999 lat
+#TLE: 1 37849U 11061A   26020.95430537  .00000198  00000+0  11470-3 0  9999
+#TLE: 2 37849  98.7819 322.9518 0002315  53.3069 306.8320 14.19527555737555
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-22 02:20:48.589000	device inactive
+
+#Closed at: 2026-01-22 02:20:49
+#Recorded file [0 MB]: 

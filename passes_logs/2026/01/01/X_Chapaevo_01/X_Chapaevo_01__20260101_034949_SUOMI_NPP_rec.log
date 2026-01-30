@@ -1,0 +1,17 @@
+#Pass ID: 20260101_034949_SUOMI NPP
+#Satellite: SUOMI NPP
+#Configuration: NPP
+#almurnet v.1.7.20240730
+#Start time: 2026-01-01 03:49:50
+
+#Version: 2.2.20231116
+#Station: X_Chapaevo_01
+#Location: 129.39018 lon 61.66317 lat
+#TLE: 1 37849U 11061A   25364.87906317  .00000195  00000+0  11345-3 0  9992
+#TLE: 2 37849  98.7794 302.0592 0002571  89.2401 270.9069 14.19520347734561
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-01 03:49:50.451000	device inactive
+
+#Closed at: 2026-01-01 03:49:51
+#Recorded file [0 MB]: 

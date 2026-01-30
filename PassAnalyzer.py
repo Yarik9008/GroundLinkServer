@@ -162,7 +162,19 @@ class PassAnalyzer:
         in_records = False
         base_date = None
 
-        for line in log_lines:
+        def has_more_data_lines(start_idx: int) -> bool:
+            for rest in log_lines[start_idx + 1:]:
+                rest = rest.strip()
+                if not rest:
+                    continue
+                if rest.startswith("#Closed at:"):
+                    return False
+                if rest.startswith("#"):
+                    continue
+                return True
+            return False
+
+        for idx, line in enumerate(log_lines):
             # Убираем переводы строк и пробелы по краям.
             line = line.strip()
             if not line:
@@ -209,7 +221,10 @@ class PassAnalyzer:
                     values[0] = f"{base_date} {time_value}"
 
             if len(values) != len(headers):
-                # Некорректная запись — пропускаем весь лог.
+                # Некорректная запись — пропускаем весь лог, кроме случая последней строки.
+                if not has_more_data_lines(idx):
+                    self.logger.warning(f"invalid last log line format, ignore: {line}")
+                    break
                 self.logger.warning(f"invalid log line format: {line}")
                 return None
 
@@ -232,7 +247,10 @@ class PassAnalyzer:
                         break
 
             if not numeric_values:
-                # Если парсинг хотя бы одного поля не удался — пропускаем весь лог.
+                # Если парсинг хотя бы одного поля не удался — пропускаем весь лог, кроме последней строки.
+                if not has_more_data_lines(idx):
+                    self.logger.warning(f"invalid last log line format, ignore: {line}")
+                    break
                 self.logger.warning(f"invalid log line format: {line}")
                 return None
 

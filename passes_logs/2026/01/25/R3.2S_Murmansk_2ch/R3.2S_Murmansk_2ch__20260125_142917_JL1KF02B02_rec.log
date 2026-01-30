@@ -1,0 +1,17 @@
+#Pass ID: 20260125_142917_JL1KF02B02
+#Satellite: JL1KF02B02
+#Configuration: 01B_900M
+#almurnet v.1.7.20251203
+#Start time: 2026-01-25 14:35:55
+
+#Version: 2.2.20231116
+#Station: R3.2S_Murmansk_2ch
+#Location: 33.079688 lon 68.888172 lat
+#TLE: 1 61193U 24169E   26024.52893868  .00009249  00000+0  57481-3 0  9996
+#TLE: 2 61193  97.5621 116.2803 0013684 104.2578 256.0172 15.09798233 74160
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-25 14:35:55.353000	device inactive
+
+#Closed at: 2026-01-25 14:35:56
+#Recorded file [0 MB]: D:/lorett/data/31041_260125_173555.dat

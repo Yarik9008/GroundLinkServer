@@ -1,0 +1,17 @@
+#Pass ID: 20260117_114150_NOAA 21 (JPSS-2)
+#Satellite: NOAA 21 (JPSS-2)
+#Configuration: NOAA-21
+#almurnet v.1.7.20240730
+#Start time: 2026-01-17 11:47:10
+
+#Version: 2.2.20231116
+#Station: R2.0S-dem200
+#Location: 37.641188 lon 55.676863 lat
+#TLE: 1 54234U 22150A   26016.21096038  .00000027  00000+0  33607-4 0  9993
+#TLE: 2 54234  98.7500 317.0960 0000625 282.3388  77.7718 14.19534911164985
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-17 11:47:10.995000	device inactive
+
+#Closed at: 2026-01-17 11:47:11
+#Recorded file [0 MB]: 

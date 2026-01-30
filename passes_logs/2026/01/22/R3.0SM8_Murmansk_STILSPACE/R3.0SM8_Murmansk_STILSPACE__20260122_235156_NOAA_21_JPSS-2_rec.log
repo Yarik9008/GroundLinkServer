@@ -1,0 +1,17 @@
+#Pass ID: 20260122_235156_NOAA 21 (JPSS-2)
+#Satellite: NOAA 21 (JPSS-2)
+#Configuration: NOAA-21
+#almurnet v.1.7.20240730
+#Start time: 2026-01-22 23:51:57
+
+#Version: 2.2.20231116
+#Station: R3.0SM8_Murmansk_STILSPACE
+#Location: 33.092731 lon 68.902999 lat
+#TLE: 1 54234U 22150A   26022.41365820  .00000211  00000+0  12084-3 0  9990
+#TLE: 2 54234  98.7507 323.2240 0000658 234.5287 125.5828 14.19537645165864
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-22 23:51:57.042000	device inactive
+
+#Closed at: 2026-01-22 23:51:58
+#Recorded file [0 MB]: 

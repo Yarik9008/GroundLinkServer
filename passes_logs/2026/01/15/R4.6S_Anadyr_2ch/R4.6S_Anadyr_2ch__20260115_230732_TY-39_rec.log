@@ -1,0 +1,17 @@
+#Pass ID: 20260115_230732_TY-39
+#Satellite: TY-39
+#Configuration: TY-39
+#almurnet v.1.7.20251203
+#Start time: 2026-01-15 23:15:13
+
+#Version: 2.2.20231116
+#Station: R4.6S_Anadyr_2ch
+#Location: 177.4865 lon 64.73178 lat
+#TLE: 1 51832U 22019J   25350.98409328  .00002071  00000-0  10077-3 0  9999
+#TLE: 2 51832  97.3692  53.3782 0009735 139.3452 220.8512 15.19459940210129
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-15 23:15:13.384000	device inactive
+
+#Closed at: 2026-01-15 23:15:14
+#Recorded file [0 MB]: D:/lorett/data/35034_260116_021513.dat

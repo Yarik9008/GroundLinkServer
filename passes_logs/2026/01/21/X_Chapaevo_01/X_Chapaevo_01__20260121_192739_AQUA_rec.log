@@ -1,0 +1,17 @@
+#Pass ID: 20260121_192739_AQUA
+#Satellite: AQUA
+#Configuration: AQUA
+#almurnet v.1.7.20240730
+#Start time: 2026-01-21 19:27:40
+
+#Version: 2.2.20231116
+#Station: X_Chapaevo_01
+#Location: 129.39018 lon 61.66317 lat
+#TLE: 1 27424U 02022A   26020.90316333  .00002787  00000+0  56766-3 0  9999
+#TLE: 2 27424  98.4095 347.4297 0002000  71.6339 309.8236 14.61840001261750
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-21 19:27:40.438000	device inactive
+
+#Closed at: 2026-01-21 19:27:41
+#Recorded file [0 MB]: 

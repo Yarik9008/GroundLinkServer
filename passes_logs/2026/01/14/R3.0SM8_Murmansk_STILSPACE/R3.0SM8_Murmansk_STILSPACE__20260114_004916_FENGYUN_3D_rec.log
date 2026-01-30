@@ -1,0 +1,17 @@
+#Pass ID: 20260114_004916_FENGYUN 3D
+#Satellite: FENGYUN 3D
+#Configuration: FENGYUN 3D
+#almurnet v.1.7.20240730
+#Start time: 2026-01-14 00:49:17
+
+#Version: 2.2.20231116
+#Station: R3.0SM8_Murmansk_STILSPACE
+#Location: 33.092731 lon 68.902999 lat
+#TLE: 1 43010U 17072A   26013.31211337  .00000452  00000+0  23563-3 0  9990
+#TLE: 2 43010  98.9934 345.1024 0002270 111.0315 249.1103 14.19696845423017
+
+#Time	Az	El	Level	Level2	SNR	BER	BlckErr	Temp	State	Recorded	gain1	gain2
+#2026-01-14 00:49:17.034000	device inactive
+
+#Closed at: 2026-01-14 00:49:18
+#Recorded file [0 MB]: 

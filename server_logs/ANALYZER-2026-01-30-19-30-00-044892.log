@@ -1,0 +1,107 @@
+2026-01-30 19:30:00,045 : INFO : ANALYZER : Start logging
+2026-01-30 19:32:32,095 : WARNING : ANALYZER : invalid log line format: 2026-01-05 12:12:26.36	0.93	31.51
+2026-01-30 19:32:32,096 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\05\R3.0SM8_Murmansk_STILSPACE\R3.0SM8_Murmansk_STILSPACE__20260105_120410_FENGYUN_3E_rec.log
+2026-01-30 19:32:44,890 : WARNING : ANALYZER : invalid log line format: 2026-01-18 12:50:22.34	192.90	12.44
+2026-01-30 19:32:44,890 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\18\R2.0S_Moscow\R2.0S_Moscow__20260118_124759_FENGYUN_3D_rec.log
+2026-01-30 19:32:59,732 : WARNING : ANALYZER : invalid log line format: 2026-01-22 12:50:22.02	319.45	10.62
+2026-01-30 19:32:59,733 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\22\R3.2S_Murmansk\R3.2S_Murmansk__20260122_124149_NOAA_20_JPSS-1_rec.log
+2026-01-30 19:33:03,833 : WARNING : ANALYZER : invalid log line format: 2026-01-15 4	0	87	18213
+2026-01-30 19:33:03,833 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\15\R3.2S_Murmansk\R3.2S_Murmansk__20260115_170029_2025-108B_rec2.log
+2026-01-30 19:33:03,837 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-15 17:09:45.28	337.72	4.13	-58.7	-60.8	3.7	0.00e+00	0	60	104
+2026-01-30 19:33:20,022 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-30 13:31:02.09	321.19	6.75	-51.4	-70.
+2026-01-30 19:33:20,197 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-29 10:15:39.11	343.08	8.99	-42.1	-46.3	17.1
+2026-01-30 19:33:20,213 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-29 09:46:27.45	346.40	6.16	-49
+2026-01-30 19:33:20,216 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-29 09:31:29.63	2.28	6.15	-49.3	-
+2026-01-30 19:33:20,219 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-29 08:55:54.98	353.28	7.47	-49.4	-64.7	3.8
+2026-01-30 19:33:20,250 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-29 03:18:06.45	260.78	6.61	-49.6	-70.8	3.8	7.47e-01	0	44	104
+2026-01-30 19:33:20,273 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-29 01:42:46.46	202.82	6.24	-49.8	-70.9	3.8	7.
+2026-01-30 19:33:20,498 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-28 09:50:21
+2026-01-30 19:33:20,541 : WARNING : ANALYZER : invalid last log line format, ignore: 2026
+2026-01-30 19:33:20,924 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-27 07:52:30.40	2.98	7.70	-50.4	-65.5	3.8	1.49e+00	0	44	104	764411904
+2026-01-30 19:33:20,928 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-27 05:
+2026-01-30 19:33:21,013 : WARNING : ANALYZER : invalid log line format: 2026-01-26 23:42:54.33	192.75	9.04	-43.3	-46.3	17.0	0.00e+00	0	44	0	1287651328	57
+2026-01-30 19:33:21,014 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\26\T1\T1__20260126_233048_NOAA_20_JPSS-1_rec.log
+2026-01-30 19:33:21,145 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-26 10:28:36.18	357.04	7.58	-50.1	-62.4	3.8	8.47e-01	0	43	104
+2026-01-30 19:33:21,357 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-25 22:35:09.63	246.40	8.29	-52.3	-56.9	3.7	0.
+2026-01-30 19:33:21,365 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-25 21:58:5
+2026-01-30 19:33:21,369 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-25 20:57:00.34	150.89	8.84	-48.0	-67.0	3.8	3.
+2026-01-30 19:33:21,533 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-25 06:35:03.48	6.56	5.36	-51.3	-56.1	3.7	0.
+2026-01-30 19:33:21,536 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-25 05:59:20.79	258.71	6.21	-49.1	-60.3
+2026-01-30 19:33:21,631 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-24 22:56:36.57	264.25	8.01	-5
+2026-01-30 19:33:21,657 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-
+2026-01-30 19:33:21,659 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-24 20:14:04.34	123.27	7.48	-48.7
+2026-01-30 19:33:21,751 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-24 10:1
+2026-01-30 19:33:21,768 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-24 09:26:13.11	0.90	5.47	-49.2	-61.6	3.8	8.
+2026-01-30 19:33:21,851 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-24 01:16:12.
+2026-01-30 19:33:21,952 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-23 17:53:53.85	105.85	6.59	-49.
+2026-01-30 19:33:22,175 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-23 00:37:36.54	220.48	7.11	-
+2026-01-30 19:33:22,253 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-22 21:34:15.06	114.75	5.47	-49.9	-
+2026-01-30 19:33:22,257 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-22 18:45:50.89	108.38	8.83	-50.1	-68.7	3.8	8.20e-01
+2026-01-30 19:33:22,389 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-
+2026-01-30 19:33:22,514 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-21 22:30:29.43	243.71	8.90	-53.7	-58.0	3.7	0.
+2026-01-30 19:33:22,828 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-20 18:54:28.13	104.76	5.58	-50.7	-69.7	3.8	8.47e-01	0
+2026-01-30 19:33:22,876 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-20 1
+2026-01-30 19:33:22,953 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-20 06:52:00.84	7.19	8.55	-52.9	-57.2	3.7	0.
+2026-01-30 19:33:23,048 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-19 22:59:02.68	134.87	5.67	-50.5	-69.7	3.8	8.47
+2026-01-30 19:33:23,173 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-19 08:22:46.91	355.81	5.90	-50.1	-65.7	3.8	1.49e+00	0	41	104	94476
+2026-01-30 19:33:23,176 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-19 07:53:07.59	357.14	5.11	-50.1	-63.5	3.8	1.49e+00	0	44	10
+2026-01-30 19:33:23,290 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-18 22:31:29.64	150.87	5.41	-49.9	-65.3	3.8	1.49e+00	0	39
+2026-01-30 19:33:23,292 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-18 22:14:40.78	116.76	7.38	-49.9	-69.2
+2026-01-30 19:33:23,450 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-18 04:54:15.95	223.22	7.35	-50.1	-61.1	3.8	8.47e-01	0	42	104	4
+2026-01-30 19:33:23,491 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-18 01:14:13.99	186.96	6.63	-51.1	-71.8	3.8	7.46e-01	0	44	104	1128792
+2026-01-30 19:33:23,508 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-18 00:51:55.62	229.57	5.49	-50.2	-65.7	3.8	1.49e+0
+2026-01-30 19:33:23,604 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-17 19:53:15
+2026-01-30 19:33:23,620 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-17 16:43:31.77	316.59	5.06
+2026-01-30 19:33:23,764 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-17 06:24:37.53	14.28	7.09	-5
+2026-01-30 19:33:23,771 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-17 03:06:39.21	141.22	8.06	-52.2	-55.4	3.7	0.00e+00	0	51
+2026-01-30 19:33:23,814 : WARNING : ANALYZER : invalid log line format: 2026-01-17 00:35:30.70	162.99	7.16	-51.5	-72.6	3.8	7.47e-01	0	43	104	1008730112	7
+2026-01-30 19:33:23,815 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\17\T1\T1__20260117_002519_AQUA_rec.log
+2026-01-30 19:33:23,850 : WARNING : ANALYZER : invalid last log line format, ignore: 2026
+2026-01-30 19:33:24,009 : WARNING : ANALYZER : invalid last log line format, ignore: 2026
+2026-01-30 19:33:24,020 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-16 05:31:50.87	243.69	6.69	-45.4	-58.9	3.8	8.47e-01	0	43	104	3229614080
+2026-01-30 19:33:24,064 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-16
+2026-01-30 19:33:24,297 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-14 23:47:05.70	192.65	9.47	-50.5	-65.9	3.8	1.49e+00	0	43	104	0
+2026-01-30 19:33:24,326 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-14 20:25:02.81	151.89	6.44	-49.2	-55.0	3.7	0.00e+00	0	51	104
+2026-01-30 19:33:24,432 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-14 06:08:30.68	267.26	7.68	-51.6	-
+2026-01-30 19:33:24,567 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-13 20:47:11.84	165.94	8.93	-49.1	-54.2	3.7	0.00e+00	0	52	104
+2026-01-30 19:33:24,587 : WARNING : ANALYZER : invalid log line format: 2026-01-13 14:40:58.53	341.99	5.19	-50.9	-61.8	3.8	8.47e-01	0	42	104	5016387584	72
+2026-01-30 19:33:24,589 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\13\T1\T1__20260113_142804_FENGYUN_3E_rec.log
+2026-01-30 19:33:24,715 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-
+2026-01-30 19:33:24,753 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-13 02:22:50.45	279.67	4.97	-50.9	-66.2	3.8	1.
+2026-01-30 19:33:24,836 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-12 21:09:23.61	182.14	10.65	-52.8	-57.8	3.7	0.00e+00	0	50	104
+2026-01-30 19:33:24,859 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-12 13:28:41.51	321.00	6.85	-53.8	-7
+2026-01-30 19:33:24,881 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-12 12:13:
+2026-01-30 19:33:24,919 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-12 10:55:06.56	336.48	7.14	-52.4	-67.6	3.8	1.49e+00	0	44	104	1
+2026-01-30 19:33:25,145 : WARNING : ANALYZER : invalid log line format: 2026-01-11 22:33:11.50	154.35	5.77	-50.6	-63.7	3.8	1.49e+00	0	40	104	0	7
+2026-01-30 19:33:25,146 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\11\T1\T1__20260111_222147_NOAA_21_JPSS-2_rec.log
+2026-01-30 19:33:25,183 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-11 12:03:11.36	321.51	6.49	-52.4	-65.5	3.8	1.49
+2026-01-30 19:33:25,203 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-11 11:14:04.67	350.00	5.74	-53.7	-74.2	3.8	7
+2026-01-30 19:33:25,279 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-11 09:13:04.73	350.40	5.90	-52.4	-67.6	3.8	1.49e+00	0
+2026-01-30 19:33:25,285 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-11 07:53:12.49	356.94	5.01	-50.9	-66.2	3.8	1.49e+00	0	43	10
+2026-01-30 19:33:25,371 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-11 00:01:35.26	143.90	5.12	-5
+2026-01-30 19:33:25,522 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-10 09:00:48.38	329.94	5.15	-53.9	-58.3	3.7	0.00e+00	0	52	104	100831068
+2026-01-30 19:33:25,618 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-09 22:16:34.99	228.90	6.18	-54.0	-58.4	3.7	0.00e+00	0	47	104
+2026-01-30 19:33:25,668 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-09 10:11:01.15	343.17	8.35	-48.5	-64.2	3.8	1.49e+00	0	43	104	12949
+2026-01-30 19:33:25,775 : WARNING : ANALYZER : invalid log line format: 2026-01-09 00:20:22.48	214.04	8.03	-49.5	-64.8	3.8	1.49e+00	0	43	104	1277165568	70
+2026-01-30 19:33:25,776 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\09\T1\T1__20260109_000816_NOAA_20_JPSS-1_rec.log
+2026-01-30 19:33:25,852 : WARNING : ANALYZER : invalid last log line format, ignore: 2
+2026-01-30 19:33:25,909 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-08 08:28:34.33	356.64	6.91	-
+2026-01-30 19:33:25,918 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-08
+2026-01-30 19:33:26,002 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-07 22:06:30.42	134.34	7.64
+2026-01-30 19:33:26,393 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-06 07:22:08.46	357.41	8.68	-54.9	-59.8	3.7	0.00e+00	0	46	104
+2026-01-30 19:33:26,405 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-06 04:36:11.91	136.35	6.99	-50.4	-69.6	3.
+2026-01-30 19:33:26,413 : WARNING : ANALYZER : invalid last log line format, ignore: 202
+2026-01-30 19:33:26,448 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-06 00:26:27.05	217.32	7.61	-50.2	-63.7	3.8	1
+2026-01-30 19:33:26,451 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-06 00:05:57
+2026-01-30 19:33:26,708 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-04 2
+2026-01-30 19:33:26,755 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-04 11:40:13.47	345.88	5.11	-56.1	-77.0	3.8	7.45e-01	0	43	104	1132986
+2026-01-30 19:33:26,803 : WARNING : ANALYZER : invalid last log line format, ignore: 2026
+2026-01-30 19:33:26,972 : WARNING : ANALYZER : invalid log line format: 2026-01-03 22:33:09.99	154.00	6.03	-54.5	-69.9	3.8	1.49e+00	0	39	104	1058013184	80
+2026-01-30 19:33:26,972 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\03\T1\T1__20260103_222151_NOAA_20_JPSS-1_rec.log
+2026-01-30 19:33:26,980 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-
+2026-01-30 19:33:26,982 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-0
+2026-01-30 19:33:27,052 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-03 10:24:09.84	341.94	5.18	-52.9	-6
+2026-01-30 19:33:27,256 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-02 21:44:51.53	209.11	9.86	-51.0	-56.0	3.7	0.00e+00	0	52	104
+2026-01-30 19:33:27,728 : WARNING : ANALYZER : invalid last log line format, ignore: 2026-01-0
+2026-01-30 19:33:27,769 : WARNING : ANALYZER : invalid log line format: 2026-01-01 02:26:36.35	281.92	5.85	-51.3	-66.5	3.8	1.49e+00	0	44	104	0	74
+2026-01-30 19:33:27,770 : WARNING : ANALYZER : skip log with invalid record: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\passes_logs\2026\01\01\T1\T1__20260101_021833_SUOMI_NPP_rec.log
