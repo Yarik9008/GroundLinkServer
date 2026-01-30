@@ -6,7 +6,6 @@ import shutil
 import tempfile
 import atexit
 from datetime import date, datetime, timedelta, timezone
-from pprint import pprint
 from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import urlopen
 from typing import Optional, Tuple
@@ -41,6 +40,7 @@ class EusLogDownloader:
         - download_logs_file: скачивает лог-файлы.
         - download_graphs_file: рендерит PNG-графики.
     """
+
     # Инициализация
     def __init__(self, logger: Logger) -> None:
         """Создает клиент, подготавливает параметры и regex.
@@ -51,12 +51,18 @@ class EusLogDownloader:
         Returns:
             None
         """
+
+        # проверяем, что logger не является None
         if logger is None:
             raise ValueError("logger is required")
+
+        # присваиваем logger
         self.logger = logger
 
-        self.data_passes = {}
+        # множество для хранения дочерних процессов
         self._child_processes = set()
+
+        # регистрация функции очистки дочерних процессов при завершении программы
         atexit.register(self._cleanup_child_processes)
 
         # Источники и параметры запроса.
@@ -68,18 +74,18 @@ class EusLogDownloader:
         ]
 
         # t0 - начальная дата, t1 - конечная дата (формат ГГГГ-ММ-ДД).
-        # по умолчанию берется текущая дата и добавляется 1 день (нужно для портала EUS)
-        start_dt = datetime.now(timezone.utc)
-        end_dt = start_dt + timedelta(days=1)
+        start_dt = None
+        end_dt = None
 
+        # параметры даты
         self.params: Tuple[datetime, datetime] = (start_dt, end_dt)
+
         # ширина и высота графика
         self.graph_viewport_width = 620
         self.graph_viewport_height = 680
         self.graph_load_delay = 0.5
-        # скролл по x и y
-        self.graph_scroll_x = 0
-        self.graph_scroll_y = 0
+        self.graph_scroll_x = 0 
+        self.graph_scroll_y = 0 
 
         # Регулярные выражения для станций, строк таблицы, ячеек и ссылок на пролеты.
         # Ссылка на станцию: забираем значение stid.
@@ -101,6 +107,7 @@ class EusLogDownloader:
             re.I | re.S,
         )
 
+        # выводим информацию о инициализации
         self.logger.info("EusLogPortal initialized")
 
     # Валидация диапазона дат
@@ -114,7 +121,10 @@ class EusLogDownloader:
         Returns:
             None
         """
+        # выводим информацию о проверке диапазона дат
         self.logger.debug(f"validate dates: start={start_value}, end={end_value}")
+        
+        # если дата конца меньше или равна дате начала, то выбрасываем исключение
         if end_value <= start_value:
             raise ValueError("end_day must be later than start_day")
 
@@ -164,67 +174,202 @@ class EusLogDownloader:
             "t1": end_value.isoformat(),
         }
 
-    # Скачивание одного файла лога (async)
+    # Скачивание одного файла лога (async, потоково, с .part и ретраями)
     async def _download_single_log(
         self,
         session: aiohttp.ClientSession,
-        sem: asyncio.Semaphore,
         url: str,
-        out_dir: str,
-        ) -> str:
+        dst_path: str,
+        *,
+        chunk_size: int,
+        retries: int,
+        ) -> Tuple[str, Optional[str]]:
+
         """Скачивает один лог-файл по URL, если еще не сохранен.
 
         Args:
             session: HTTP-сессия aiohttp.
-            sem: Семафор для ограничения параллелизма.
             url: Прямая ссылка на log_get.
-            out_dir: Каталог для сохранения.
+            dst_path: Полный путь для сохранения.
+            chunk_size: Размер чанка чтения (байт).
+            retries: Число повторов на файл.
 
         Returns:
-            str: Путь к сохраненному файлу.
+            Tuple[str, Optional[str]]: ("downloaded"|"skipped"|"failed", error_message_or_None)
         """
-        # создаем каталог для сохранения
-        os.makedirs(out_dir, exist_ok=True)
-        # извлекаем имя файла из URL
-        # и создаем путь к файлу
-        filename = os.path.basename(urlparse(url).path)
-        path = os.path.join(out_dir, filename)
-        # проверяем, если файл уже существует и не пустой, то пропускаем скачивание
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            self.logger.debug( f"file exists, skip: {path}")
-            return path
-        # скачиваем файл асинхронно     
-        async with sem:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as r:
-                r.raise_for_status()
-                with open(path, "wb") as f:
-                    async for chunk in r.content.iter_chunked(8192):
-                        f.write(chunk)
-        # сохраняем файл
-        self.logger.debug( f"file saved: {path}")
-        return path
+
+        # если файл уже существует и не пустой, пропускаем
+        if os.path.exists(dst_path) and os.path.getsize(dst_path) > 0:
+            self.logger.debug(f"file exists, skip: {dst_path}")
+            return ("skipped", None)
+
+        # создаем временный путь для скачивания
+        tmp_path = f"{dst_path}.part"
+        # переменная для хранения последней ошибки
+        last_err: Optional[BaseException] = None
+
+        # цикл для повторов скачивания
+        for attempt in range(retries + 1):
+            # переменная для хранения ответа
+            resp: Optional[aiohttp.ClientResponse] = None
+            try:
+                resp = await session.get(url)
+                resp.raise_for_status()
+                with open(tmp_path, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                os.replace(tmp_path, dst_path)
+                self.logger.debug(f"file saved: {dst_path}")
+                return ("downloaded", None)
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+                last_err = e
+                if attempt < retries:
+                    await asyncio.sleep(0.3 * (2 ** attempt))
+            finally:
+                if resp is not None:
+                    try:
+                        resp.release()
+                    except Exception:
+                        pass
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
+
+        # подчистим битый .part
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+        return ("failed", f"{type(last_err).__name__}: {last_err}")
     
-    # Скачивание списка логов (async)
-    async def _download_logs_async(self, tasks: list, max_parallel: int = 10) -> list:
-        """Параллельно скачивает список логов и возвращает результаты.
+    # Скачивание списка логов (async, через очередь)
+    async def _download_logs_async(
+        self,
+        tasks: list,
+        results: list,
+        *,
+        max_parallel: int = 10,
+        queue_size: int = 2000,
+        chunk_size: int = 64 * 1024,
+        retries: int = 3,
+        timeout_total: float = 120.0,
+        errors_log_path: Optional[str] = None,
+        ) -> dict:
+        """Параллельно скачивает список логов и возвращает статистику.
 
         Args:
-            tasks: Список (get_url, out_dir).
+            tasks: Список (index, get_url, dst_path).
+            results: Список для заполнения путей (по index).
             max_parallel: Максимум одновременных скачиваний.
+            queue_size: Размер очереди.
+            chunk_size: Размер чанка чтения (байт).
+            retries: Число повторов на файл.
+            timeout_total: Таймаут (сек) на запрос.
+            errors_log_path: Путь к файлу ошибок (tsv) или None.
 
         Returns:
-            list: Список путей или исключений.
+            dict: Статистика скачивания.
         """
-        # создаем семафор для ограничения параллелизма
-        sem = asyncio.Semaphore(max_parallel)
-        # создаем сессию для скачивания файлов
-        async with aiohttp.ClientSession() as session:
-            # создаем список задач для скачивания файлов
-            download_tasks = []
-            # добавляем задачи для скачивания файлов
-            for get_url, out_dir in tasks:
-                download_tasks.append(self._download_single_log(session, sem, get_url, out_dir))
-            return await asyncio.gather(*download_tasks, return_exceptions=True)
+        timeout = aiohttp.ClientTimeout(
+            total=timeout_total,
+            connect=10,
+            sock_connect=10,
+            sock_read=timeout_total,
+        )
+
+        connector = aiohttp.TCPConnector(
+            limit=max_parallel * 2,
+            limit_per_host=max_parallel,
+            ttl_dns_cache=300,
+            keepalive_timeout=30,
+            enable_cleanup_closed=True,
+        )
+
+        headers = {"User-Agent": "eus-log-downloader/1.0"}
+        q: asyncio.Queue[Optional[Tuple[int, str, str]]] = asyncio.Queue(maxsize=queue_size)
+        tasks_list = []
+        session: Optional[aiohttp.ClientSession] = None
+        stats = {"downloaded": 0, "skipped": 0, "failed": 0, "errors_file": None}
+
+        async def worker(wid: int) -> None:
+            while True:
+                item = await q.get()
+                try:
+                    if item is None:
+                        return
+                    index, get_url, dst_path = item
+                    status, err = await self._download_single_log(
+                        session,
+                        get_url,
+                        dst_path,
+                        chunk_size=chunk_size,
+                        retries=retries,
+                    )
+                    if status in ("downloaded", "skipped"):
+                        results[index] = dst_path
+                        if status == "downloaded":
+                            stats["downloaded"] += 1
+                        else:
+                            stats["skipped"] += 1
+                    else:
+                        results[index] = None
+                        stats["failed"] += 1
+                        if stats.get("errors_file"):
+                            stats["errors_file"].write(f"{get_url}\t{dst_path}\t{err}\n")
+                        else:
+                            self.logger.warning(f"log download failed: {get_url} err={err}")
+                finally:
+                    q.task_done()
+
+        try:
+            if errors_log_path:
+                os.makedirs(os.path.dirname(errors_log_path) or ".", exist_ok=True)
+                stats["errors_file"] = open(errors_log_path, "a", encoding="utf-8")
+
+            session = aiohttp.ClientSession(timeout=timeout, connector=connector, headers=headers)
+
+            tasks_list = [asyncio.create_task(worker(i)) for i in range(max_parallel)]
+
+            for it in tasks:
+                await q.put(it)
+            for _ in range(max_parallel):
+                await q.put(None)
+
+            await q.join()
+            await asyncio.gather(*tasks_list, return_exceptions=False)
+            return {k: v for k, v in stats.items() if k != "errors_file"}
+        finally:
+            ef = stats.get("errors_file")
+            if ef is not None:
+                try:
+                    ef.flush()
+                    ef.close()
+                except Exception:
+                    pass
+            for t in tasks_list:
+                if t and not t.done():
+                    t.cancel()
+            if tasks_list:
+                await asyncio.gather(*tasks_list, return_exceptions=True)
+            if session is not None:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
+            try:
+                await connector.close()
+            except Exception:
+                pass
+            try:
+                del tasks_list
+                del q
+                del session
+            except Exception:
+                pass
 
     # Извлекает имя файла лога из URL просмотра или строки с именем файла.
     def _extract_log_filename(self, view_url_or_filename: str) -> str:
@@ -510,76 +655,102 @@ class EusLogDownloader:
         Returns:
             dict: Словарь {station: set((view_url, get_url))}.
         """
+        def iter_month_ranges(start_dt: datetime, end_dt: datetime):
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            tz = start_dt.tzinfo
+            current = start_date
+            while current < end_date:
+                next_month = (current.replace(day=1) + timedelta(days=32)).replace(day=1)
+                chunk_end = min(next_month, end_date)
+                yield (
+                    datetime.combine(current, datetime.min.time(), tzinfo=tz),
+                    datetime.combine(chunk_end, datetime.min.time(), tzinfo=tz),
+                )
+                current = chunk_end
+
         passes = {}
         seen = {}
-        for url in self.urls:
-            # загружаем HTML по URL
-            html = self._load_html(url, params=params)
-            # Собираем станции в порядке на странице и ссылки на пролеты по станциям.
-            self.logger.debug(f"parse page: base_url={url}, html_size={len(html)}")
-            local = []
-            for match in self.station_re.finditer(html):
-                station = match.group(1)
-                if station not in local:
-                    local.append(station)
-            # собираем станции в порядке на странице и ссылки на пролеты по станциям.
-            for station in local:
-                passes.setdefault(station, [])
-                seen.setdefault(station, set())
-            # собираем даты и ссылки на пролеты по станциям.
-            for row in self.date_row_re.finditer(html):
-                row_date = date.fromisoformat(row.group(1))
-                cells = self.td_re.findall(row.group(2))
-                for i, cell in enumerate(cells):
-                    if i >= len(local):
-                        break
-                    station = local[i]
-                    for p in self.pass_re.finditer(cell):
-                        view_url = urljoin(url, p.group(1))
-                        get_url = urljoin(url, p.group(2))
-                        key = (view_url, get_url)
-                        if key in seen[station]:
-                            continue
-                        seen[station].add(key)
 
-                        # собираем ссылки на пролеты по станциям.
-                        passes[station].append(
-                            SatPas(
-                                graph_url=view_url,
-                                log_url=get_url,
+        if params is None:
+            ranges = [None]
+        else:
+            start_dt, end_dt = params
+            if not isinstance(start_dt, datetime) or not isinstance(end_dt, datetime):
+                raise TypeError("params must contain datetime objects")
+            if (end_dt.date() - start_dt.date()).days > 31:
+                ranges = list(iter_month_ranges(start_dt, end_dt))
+            else:
+                ranges = [params]
+
+        for range_params in ranges:
+            for url in self.urls:
+                # загружаем HTML по URL
+                html = self._load_html(url, params=range_params)
+                # Собираем станции в порядке на странице и ссылки на пролеты по станциям.
+                self.logger.debug(f"parse page: base_url={url}, html_size={len(html)}")
+                local = []
+                for match in self.station_re.finditer(html):
+                    station = match.group(1)
+                    if station not in local:
+                        local.append(station)
+                # собираем станции в порядке на странице и ссылки на пролеты по станциям.
+                for station in local:
+                    passes.setdefault(station, [])
+                    seen.setdefault(station, set())
+                # собираем даты и ссылки на пролеты по станциям.
+                for row in self.date_row_re.finditer(html):
+                    row_date = date.fromisoformat(row.group(1))
+                    cells = self.td_re.findall(row.group(2))
+                    for i, cell in enumerate(cells):
+                        if i >= len(local):
+                            break
+                        station = local[i]
+                        for p in self.pass_re.finditer(cell):
+                            view_url = urljoin(url, p.group(1))
+                            get_url = urljoin(url, p.group(2))
+                            key = (view_url, get_url)
+                            if key in seen[station]:
+                                continue
+                            seen[station].add(key)
+
+                            # собираем ссылки на пролеты по станциям.
+                            passes[station].append(
+                                SatPas(
+                                    graph_url=view_url,
+                                    log_url=get_url,
+                                )
                             )
-                        )
 
-        # собираем ссылки на пролеты по станциям.
-        self.data_passes = passes
-        return self.data_passes
+        # возвращаем ссылки по станциям.
+        return passes
 
     # Возвращает отсортированный список станций для текущих данных.
-    def get_station_list(self) -> list:
-        """Возвращает отсортированный список станций из data_passes.
+    def get_station_list(self, passes: dict) -> list:
+        """Возвращает отсортированный список станций из passes.
 
         Returns:
             list: Список названий станций.
         """
         # собираем станции в порядке на странице и ссылки на пролеты по станциям.
-        stations = sorted(list(self.data_passes.keys()))
+        stations = sorted(list(passes.keys()))
         self.logger.info(f"stations {stations}")
         self.logger.debug( f"stations found: {len(stations)}")
         return stations
 
-    # Печатает названия станций в stdout.
-    def print_station_list(self) -> None:
+    # Печатает названия станций
+    def print_station_list(self, passes: dict) -> None:
         """Печатает список станций в stdout.
 
         Returns:
             None
         """
-        stations = self.get_station_list()
+        stations = self.get_station_list(passes)
         for station in stations:
             print(station)
 
     # Возвращает список пролетов для станции.
-    def get_passes(self, station: str) -> list[SatPas]:
+    def get_passes(self, passes: dict, station: str) -> list[SatPas]:
         """Возвращает список пролетов (SatPas) для станции.
 
         Args:
@@ -588,7 +759,6 @@ class EusLogDownloader:
         Returns:
             list[SatPas]: Список пролетов для станции.
         """
-        passes = self.data_passes
         if station in passes:
             # сортируем пролета по дате, URL лога и URL графика
             result = sorted(
@@ -602,7 +772,7 @@ class EusLogDownloader:
         return []
 
     # Печатает URL пролетов для станции.
-    def print_passes(self, station: str) -> None:
+    def print_passes(self, passes: dict, station: str) -> None:
         """Печатает список пролетов (view/get) в stdout.
 
         Args:
@@ -612,13 +782,24 @@ class EusLogDownloader:
             None
         """ 
         # получаем список пролетов для станции
-        passes = self.get_passes(station)
+        passes = self.get_passes(passes, station)
         # печатаем список пролетов
         for sat_pass in passes:
             print(f"{sat_pass.graph_url} {sat_pass.log_url}")
 
     # Скачивает файлы логов для указанных пролетов.
-    def download_logs_file(self, passes_to_download: list, out_dir: str, max_parallel: int = 10) -> list:
+    def download_logs_file(
+        self,
+        passes_to_download: list,
+        out_dir: str,
+        max_parallel: int = 10,
+        queue_size: int = 2000,
+        chunk_size: int = 64 * 1024,
+        retries: int = 3,
+        timeout_total: float = 120.0,
+        errors_log_path: Optional[str] = None,
+        ) -> list:
+
         """Скачивает лог-файлы и раскладывает их по датам и станциям.
 
         Принимает список SatPas. Возвращает тот же список с заполненным log_path.
@@ -631,31 +812,43 @@ class EusLogDownloader:
         Returns:
             list: Тот же список SatPas с заполненным log_path.
         """
+
         # создаем каталог для сохранения
         os.makedirs(out_dir, exist_ok=True)
         tasks = []
+        task_indexes = []
         date_re = re.compile(r"(\d{8})")
         # создаем регулярное выражение для извлечения названия станции
         station_re = re.compile(r"([^/\\\\]+?)__\d{8}")
+
+        # цикл для скачивания логов
         for index, item in enumerate(passes_to_download):
+            # проверяем, что item является экземпляром SatPas
             if not isinstance(item, SatPas):
                 raise ValueError("passes_to_download items must be SatPas")
-            # если URL лога не найден, то выводим информацию о не найденном URL лога
+            # если URL лога не найден, то пропускаем
             if not item.log_url:
                 self.logger.warning("SatPas.log_url is empty, skip download")
-                continue
+                continue 
+            # получаем URL лога
             get_url = item.log_url
+            # получаем название станции
             station_name = item.station_name or "unknown_station"
+            # получаем дату пролета
             pass_date = item.pass_date  # дата пролета
+
+            # если дата пролета найдена, то создаем путь к каталогу для сохранения
             if pass_date:
+                # создаем строку даты
                 date_str = pass_date.strftime("%Y%m%d")
                 # создаем путь к каталогу для сохранения
-                date_dir = os.path.join(
-                    out_dir, date_str[0:4], date_str[4:6], date_str[6:8], station_name
-                )
+                date_dir = os.path.join(out_dir, date_str[0:4], date_str[4:6], date_str[6:8], station_name)
             else: # если дата пролета не найдена, то создаем путь к каталогу для сохранения         
+                # извлекаем дату из URL лога
                 date_match = date_re.search(get_url)
+                # извлекаем название станции из URL лога
                 station_match = station_re.search(get_url)
+                # устанавливаем название станции
                 station_name = station_match.group(1) if station_match else station_name
                 if date_match: # если дата пролета найдена, то создаем путь к каталогу для сохранения
                     date_str = date_match.group(1)
@@ -665,20 +858,32 @@ class EusLogDownloader:
                 else: # если дата пролета не найдена, то создаем путь к каталогу для сохранения
                     date_dir = os.path.join(out_dir, "unknown", "unknown", "unknown", station_name)
                     self.logger.warning(f"date not found in SatPas/url, using: {date_dir}")
+
             os.makedirs(date_dir, exist_ok=True) # создаем каталог для сохранения
-            tasks.append((index, get_url, date_dir))
+            filename = os.path.basename(urlparse(get_url).path)
+            dst_path = os.path.join(date_dir, filename)
+            tasks.append((index, get_url, dst_path))
+            task_indexes.append(index)
 
         if tasks:
-            # запускаем асинхронное скачивание логов
-            results = asyncio.run(
-                self._download_logs_async([(url, dir_path) for _, url, dir_path in tasks], max_parallel=max_parallel)
+            results = [None] * len(passes_to_download)
+            stats = asyncio.run(
+                self._download_logs_async(
+                    tasks,
+                    results,
+                    max_parallel=max_parallel,
+                    queue_size=queue_size,
+                    chunk_size=chunk_size,
+                    retries=retries,
+                    timeout_total=timeout_total,
+                    errors_log_path=errors_log_path,
+                )
             )
-            for (index, _, _), result in zip(tasks, results): # скачиваем лог-файлы
-                if isinstance(result, Exception):
-                    self.logger.exception("download failed", exc_info=result)
-                    passes_to_download[index].log_path = None # если скачивание лога не удалось, то устанавливаем log_path в None
-                else:
-                    passes_to_download[index].log_path = result # если скачивание лога удалось, то устанавливаем log_path в результат   
+            self.logger.info(
+                f"log download stats: ok={stats['downloaded']} skipped={stats['skipped']} failed={stats['failed']}"
+            )
+            for index in task_indexes:
+                passes_to_download[index].log_path = results[index]
         return passes_to_download
 
     # Скачивает изображения графиков для указанных пролетов.
@@ -759,7 +964,6 @@ class EusLogDownloader:
 
 
 if __name__ == "__main__":
-    from Logger import Logger
 
     # Логгер пишет в файл и консоль; уровень debug нужен для подробных трассировок.
     logger = Logger(path_log="eus_downloader", log_level="debug")
@@ -768,8 +972,8 @@ if __name__ == "__main__":
     portal = EusLogDownloader(logger=logger)
 
     # Диапазон дат: один день (end_day строго +1).
-    start_dt = datetime(2026, 1, 25, tzinfo=timezone.utc)
-    end_dt = start_dt + timedelta(days=1)
+    start_dt = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    end_dt = datetime(2026, 1, 30, tzinfo=timezone.utc)
     params = (start_dt, end_dt)
 
     # Тест _load_html: получаем HTML и логируем размер.
@@ -782,13 +986,12 @@ if __name__ == "__main__":
     portal.logger.debug(f"page_passes: {page_passes}")
 
     # Тест get_station_list: сортированный список станций.
-    station_list = portal.get_station_list()
+    station_list = portal.get_station_list(page_passes)
     portal.logger.info(f"station_list ok: {len(station_list)}")
 
     # Тест get_passes: ссылки на пролеты для первой станции.
-    if station_list:
-        station = station_list[0]
-        passes = portal.get_passes(station)
+    for station in station_list:
+        passes = portal.get_passes(page_passes, station)
         portal.logger.info(f"passes for {station}: {len(passes)}")
         if passes:
             results = portal.download_logs_file(
@@ -803,17 +1006,17 @@ if __name__ == "__main__":
     else:
         portal.logger.warning("no stations found")
 
-    # Тест download_graphs_file:
-    if station_list:
-        if passes:
-            results = portal.download_graphs_file(
-                passes,
-                out_dir="C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_graphs",
-            )
-            ok = sum(1 for r in results if r.graph_path)
-            fail = sum(1 for r in results if r.graph_path is None)
-            portal.logger.info(f"download_graphs_file for {station}: ok={ok}, fail={fail}")
+    # # Тест download_graphs_file:
+    # if station_list:
+    #     if passes:
+    #         results = portal.download_graphs_file(
+    #             passes,
+    #             out_dir="C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_graphs",
+    #         )
+    #         ok = sum(1 for r in results if r.graph_path)
+    #         fail = sum(1 for r in results if r.graph_path is None)
+    #         portal.logger.info(f"download_graphs_file for {station}: ok={ok}, fail={fail}")
 
-    portal.logger.debug(passes)
+    # portal.logger.debug(passes)
 
 

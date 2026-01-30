@@ -17,20 +17,14 @@ class GroundLinkServer:
         self.logger = Logger(path_log=path_log, log_level="info", logger_name="MAIN")
         
         # инициализация обработчика базы данных 
-        self.logger_db = Logger(path_log=path_log, log_level="info", logger_name="DB")
-        self.db_manager = DbManager(logger=self.logger_db)
+        self.db_manager = DbManager(logger=self.logger)
 
         # uнициализация загрузчика лог файлов 
-        self.logger_eus = Logger(path_log=path_log, log_level="info", logger_name="EUS")
-        self.eus = EusLogDownloader(logger=self.logger_eus)
+        self.eus = EusLogDownloader(logger=self.logger)
 
         # инициализация анализатора логов
-        self.logger_analyzer = Logger(path_log=path_log, log_level="info", logger_name="ANALYZER")
-        self.analyzer = PassAnalyzer(logger=self.logger_analyzer)
+        self.analyzer = PassAnalyzer(logger=self.logger)
 
-        # инициализация класса для работы с почтой
-        self.logger_email = Logger(path_log=path_log, log_level="debug", logger_name="EMAIL")
-        self.email = EmailClient(logger=self.logger_email)
 
     def buily_daily_pass_stats(self, day):
         stats = self.db_manager.get_daily_station_stats(day)
@@ -74,6 +68,7 @@ class GroundLinkServer:
             },
             "max_passes": max_passes,
         }
+
 
     def print_log_day_stats(self, stats) -> None:
         """Печатает статистику успешных пролетов за день."""
@@ -133,89 +128,67 @@ class GroundLinkServer:
         self, 
         start_day=None, # дата начала
         end_day=None, # дата конца 
-        email: bool = False,
-        debug_email: bool = False
+        email: bool = False, # отправка email
+        debug_email: bool = False # отладочная отправка email
         ):
-
-        # Определяем диапазон дат для последовательной обработки.
-        if start_day is None and end_day is None:
-            start_day = datetime.now(timezone.utc).date()
-            end_day = start_day
-        else:
-            if start_day is None:
-                start_day = end_day
-            if end_day is None:
-                end_day = start_day
-
+        # путь к каталогу для сохранения логов
         base_dir = os.path.dirname(__file__)
         passes_logs_dir = os.path.join(base_dir, "passes_logs")
-        current_day = start_day
-        # Пока текущая дата меньше или равна дате конца, то обрабатываем день
-        while current_day <= end_day:
-            # Формируем дату начала и конца дня
-            start_dt = datetime.combine(current_day, datetime.min.time(), tzinfo=timezone.utc)
-            end_dt = datetime.combine(current_day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-            # Формируем параметры для загрузки HTML страницы
-            params = (start_dt, end_dt)
+        # Загружаем HTML страницу со всем диапазоном дат.
+        # дата начала
+        start_dt = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
+        # дата конца
+        end_dt = datetime.combine(end_day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
 
-            # Загружаем HTML страницу с пролетами за день
+        # параметры даты
+        params = (start_dt, end_dt)
+
+        try:
+            # загружаем HTML страницу со всем диапазоном дат
+            page_passes_all = self.eus.load_html_and_parse(params=params)
+        except TimeoutError as exc:
+            self.logger.warning(f"load_html_and_parse timeout: {exc}")
+            return
+        except Exception as exc:
+            self.logger.exception("load_html_and_parse failed", exc_info=exc)
+            return
+
+        all_passes = []
+
+        for passes in page_passes_all.values():
+            all_passes.extend(passes)
+
+        if not all_passes:
+            self.logger.info("no passes found for date range")
+            return
+
+        try:
+            downloaded = self.eus.download_logs_file(all_passes, out_dir=passes_logs_dir)
+        except Exception as exc:
+            self.logger.exception("download_logs_file failed", exc_info=exc)
+            return
+
+        # анализируем пролета
+        analyzed = [p for p in (self.analyzer.analyze_pass(item) for item in downloaded) if p is not None]
+        
+        # список для хранения пролетов
+        ready = []
+        for sat_pass in analyzed:
+            # если лог-путь не найден, то пропускаем
+            if not sat_pass.log_path:
+                continue
+            # если дата или время начала не найдены, то пропускаем
+            if sat_pass.pass_date is None or sat_pass.pass_start_time is None:
+                continue
+            # добавляем пролета в список
+            ready.append(sat_pass)
+
+        if ready:
             try:
-                page_passes = self.eus.load_html_and_parse(params=params)
-            # Если время ожидания превышено, то выводим предупреждение
-            except TimeoutError as exc:
-                self.logger.warning(f"load_html_and_parse timeout: {exc}")
-                return
-            # Если возникает ошибка, то выводим ошибку
+                inserted = self.db_manager.add_passes_batch(ready)
+                self.logger.info(f"batch insert complete: inserted={inserted}")
             except Exception as exc:
-                self.logger.exception("load_html_and_parse failed", exc_info=exc)
-                return
-
-            # Выводим количество пролетов
-            self.logger.info(len(page_passes))
-
-            # Скачиваем логи и добавляем пролеты в БД по каждой станции.
-            for station_name, passes in page_passes.items():
-                if not passes:
-                    continue
-                try:
-                    results = self.eus.download_logs_file(passes, out_dir=passes_logs_dir)
-                    analyzed = self.analyzer.analyze_passes(results)
-                except Exception as exc:
-                    self.logger.exception(f"failed to process station {station_name}", exc_info=exc)
-                    continue
-
-                for sat_pass in analyzed:
-                    if not sat_pass.log_path:
-                        self.logger.warning(f"log download failed for {sat_pass.station_name}")
-                        continue
-                    if sat_pass.pass_date is None or sat_pass.pass_start_time is None:
-                        self.logger.warning(
-                            f"skip pass without date/time: pass_id={sat_pass.pass_id}, station={sat_pass.station_name}"
-                        )
-                        continue
-                    try:
-                        self.db_manager.add_pass(sat_pass, is_commercial=False)
-                    except Exception as exc:
-                        self.logger.exception(
-                            f"failed to add pass: pass_id={sat_pass.pass_id}, station={sat_pass.station_name}",
-                            exc_info=exc,
-                        )
-
-            # Выводим статистику за день
-            daily_stats = self.buily_daily_pass_stats(current_day)
-            self.print_log_day_stats(daily_stats)
-
-            # TODO написать класс для работы с почтой и реализовать отправку email
-            # Заглушки флагов почты.
-            if email:
-                self.logger.info("email enabled by flag")
-
-            if debug_email:
-                self.logger.info("debug email enabled by flag")
-
-            # Увеличиваем текущую дату на 1 день
-            current_day += timedelta(days=1)
-
+                self.logger.exception("batch insert failed", exc_info=exc)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
 from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
+from dataclasses import dataclass
 
 
+@dataclass
 class SatPas:
     """Данные о пролете спутника через станцию.
 

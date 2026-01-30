@@ -46,6 +46,8 @@ class DbManager:
         self.db_path = str(db_path)  # путь к базе данных
         self.logger = logger  # объект логгера
         self._ensure_parent_dir()
+        self._conn: Optional[sqlite3.Connection] = sqlite3.connect(self.db_path)
+        self._conn.execute("PRAGMA foreign_keys = ON;")
         self._init_schema()
 
     # Создает каталог для файла базы данных, если он не существует.
@@ -56,15 +58,23 @@ class DbManager:
 
     # Открывает соединение с SQLite и включает foreign_keys.
     def _connect(self) -> sqlite3.Connection:
-        """Открывает соединение с SQLite и включает foreign_keys."""
-        conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA foreign_keys = ON;")
-        return conn
+        """Возвращает текущее соединение SQLite."""
+        if self._conn is None:
+            raise RuntimeError("SQLite connection is closed")
+        return self._conn
+
+    # Закрывает соединение с SQLite.
+    def close(self) -> None:
+        """Закрывает соединение с SQLite."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     # Создает таблицы и индексы при отсутствии.
     def _init_schema(self) -> None:
         """Создает таблицы и индексы при отсутствии."""
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             conn.executescript(
                 """
                 DROP TABLE IF EXISTS commercial_passes;
@@ -133,6 +143,10 @@ class DbManager:
                 conn.execute("ALTER TABLE all_passes ADD COLUMN snr_max REAL")
             if "snr_sum" not in columns:
                 conn.execute("ALTER TABLE all_passes ADD COLUMN snr_sum REAL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
         self.logger.info("DbManager initialized")
 
@@ -233,7 +247,8 @@ class DbManager:
         # если успех пролета не задано, то берется из sat_pass.success
         success_flag = sat_pass.success if success is None else success
         # соединяемся с базой данных
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             # если pass_id задано, то проверяем, что пролет уже существует
             if sat_pass.pass_id:
                 # проверяем, что пролет уже существует
@@ -282,7 +297,134 @@ class DbManager:
                 self._normalize_date(sat_pass.pass_date),
                 is_success=success_flag,
             )
+            conn.commit()
             return int(cur.lastrowid)
+        except Exception:
+            conn.rollback()
+            raise
+
+    def add_passes_batch(self, sat_passes: Iterable[SatPas]) -> int:
+        """Добавляет несколько пролетов за одну транзакцию."""
+        conn = self._connect()
+        rows_to_insert = []
+        stats_inc = {}
+        pass_ids = [p.pass_id for p in sat_passes if p.pass_id]
+        existing_ids = set()
+
+        try:
+            if pass_ids:
+                chunk_size = 900
+                for i in range(0, len(pass_ids), chunk_size):
+                    chunk = pass_ids[i:i + chunk_size]
+                    placeholders = ",".join(["?"] * len(chunk))
+                    rows = conn.execute(
+                        f"SELECT pass_id FROM all_passes WHERE pass_id IN ({placeholders})",
+                        chunk,
+                    ).fetchall()
+                    existing_ids.update(r[0] for r in rows)
+
+            for sat_pass in sat_passes:
+                if not sat_pass.station_name or not sat_pass.satellite_name:
+                    continue
+                if sat_pass.pass_date is None or sat_pass.pass_start_time is None:
+                    continue
+                if sat_pass.pass_id and sat_pass.pass_id in existing_ids:
+                    continue
+
+                success_flag = bool(sat_pass.success)
+                rows_to_insert.append(
+                    (
+                        sat_pass.pass_id,
+                        sat_pass.station_name,
+                        sat_pass.satellite_name,
+                        str(sat_pass.location) if sat_pass.location is not None else None,
+                        self._normalize_date(sat_pass.pass_date),
+                        self._combine_date_time(sat_pass.pass_date, sat_pass.pass_start_time),
+                        self._combine_date_time(sat_pass.pass_date, sat_pass.pass_end_time),
+                        self._combine_date_time(sat_pass.pass_date, sat_pass.rx_start_time),
+                        self._combine_date_time(sat_pass.pass_date, sat_pass.rx_end_time),
+                        sat_pass.snr_awg,
+                        sat_pass.snr_max,
+                        sat_pass.snr_sum,
+                        sat_pass.log_url,
+                        sat_pass.log_path,
+                        sat_pass.graph_url,
+                        sat_pass.graph_path,
+                        1 if success_flag else 0,
+                    )
+                )
+
+                stat_day = self._normalize_date(sat_pass.pass_date)
+                key = (sat_pass.station_name, stat_day)
+                if key not in stats_inc:
+                    stats_inc[key] = {"total": 0, "success": 0, "failed": 0}
+                stats_inc[key]["total"] += 1
+                if success_flag:
+                    stats_inc[key]["success"] += 1
+                else:
+                    stats_inc[key]["failed"] += 1
+
+            if rows_to_insert:
+                conn.executemany(
+                    """
+                    INSERT INTO all_passes (
+                        pass_id, station_name, satellite_name, location, pass_date,
+                        pass_start_time, pass_end_time,
+                        rx_start_time, rx_end_time,
+                        snr_awg, snr_max, snr_sum,
+                        log_url, log_path, graph_url, graph_path,
+                        success
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows_to_insert,
+                )
+
+            for (station_name, day_value), inc in stats_inc.items():
+                total_inc = inc["total"]
+                success_inc = inc["success"]
+                failed_inc = inc["failed"]
+                conn.execute(
+                    """
+                    INSERT INTO station_stats (
+                        station_name, stat_day, total_passes, success_passes, failed_passes, failed_percent, comment
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(station_name, stat_day) DO UPDATE SET
+                        total_passes = total_passes + ?,
+                        success_passes = success_passes + ?,
+                        failed_passes = failed_passes + ?,
+                        failed_percent = CASE
+                            WHEN (total_passes + ?) > 0 THEN
+                                ROUND(
+                                    ((failed_passes + ?) * 100.0) / (total_passes + ?),
+                                    2
+                                )
+                            ELSE 0
+                        END
+                    """,
+                    (
+                        station_name,
+                        day_value,
+                        total_inc,
+                        success_inc,
+                        failed_inc,
+                        (failed_inc * 100.0) / total_inc if total_inc else 0.0,
+                        None,
+                        total_inc,
+                        success_inc,
+                        failed_inc,
+                        total_inc,
+                        failed_inc,
+                        total_inc,
+                    ),
+                )
+
+            conn.commit()
+            return len(rows_to_insert)
+        except Exception:
+            conn.rollback()
+            raise
 
     # Автоматически обновляет дневную статистику по станции.
     def _bump_stats(
@@ -355,7 +497,8 @@ class DbManager:
         Returns:
             int: ID добавленного коммерческого пролета.
         """
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             cur = conn.execute(
                 """
                 INSERT INTO commercial_passes (
@@ -372,7 +515,11 @@ class DbManager:
                     comment,
                 ),
             )
+            conn.commit()
             return int(cur.lastrowid)
+        except Exception:
+            conn.rollback()
+            raise
 
     # Возвращает список пролетов (опционально по станции).
     def list_passes(self, station_name: Optional[str] = None) -> Iterable[sqlite3.Row]:
@@ -384,8 +531,10 @@ class DbManager:
         Returns:
             Iterable[sqlite3.Row]: Список строк из all_passes.
         """
-        with self._connect() as conn:
-            conn.row_factory = sqlite3.Row
+        conn = self._connect()
+        prev_factory = conn.row_factory
+        conn.row_factory = sqlite3.Row
+        try:
             if station_name:
                 return conn.execute(
                     "SELECT * FROM all_passes WHERE station_name = ? ORDER BY pass_date, pass_start_time",
@@ -394,21 +543,23 @@ class DbManager:
             return conn.execute(
                 "SELECT * FROM all_passes ORDER BY pass_date, pass_start_time"
             ).fetchall()
+        finally:
+            conn.row_factory = prev_factory
 
     # Возвращает статистику успешных пролетов за указанный день.
     def get_daily_success_stats(self, stat_day: date | datetime | str) -> list[list]:
         """Возвращает статистику успешных пролетов за указанный день."""
         day_value = self._normalize_date(stat_day)
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT station_name, total_passes, success_passes, failed_passes, failed_percent
-                FROM station_stats
-                WHERE stat_day = ?
-                ORDER BY station_name
-                """,
-                (day_value,),
-            ).fetchall()
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT station_name, total_passes, success_passes, failed_passes, failed_percent
+            FROM station_stats
+            WHERE stat_day = ?
+            ORDER BY station_name
+            """,
+            (day_value,),
+        ).fetchall()
         if not rows:
             return []
         result: list[list] = []
@@ -428,25 +579,25 @@ class DbManager:
     def get_daily_station_stats(self, stat_day: date | datetime | str) -> list[list]:
         """Возвращает статистику по станциям за день с средним SNR."""
         day_value = self._normalize_date(stat_day)
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT s.station_name,
-                       s.total_passes,
-                       s.success_passes,
-                       s.failed_passes,
-                       s.failed_percent,
-                       ROUND(AVG(p.snr_awg), 2) AS snr_awg
-                FROM station_stats s
-                LEFT JOIN all_passes p
-                  ON p.station_name = s.station_name
-                 AND p.pass_date = s.stat_day
-                WHERE s.stat_day = ?
-                GROUP BY s.station_name, s.total_passes, s.success_passes, s.failed_passes, s.failed_percent
-                ORDER BY s.station_name
-                """,
-                (day_value,),
-            ).fetchall()
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT s.station_name,
+                   s.total_passes,
+                   s.success_passes,
+                   s.failed_passes,
+                   s.failed_percent,
+                   ROUND(AVG(p.snr_awg), 2) AS snr_awg
+            FROM station_stats s
+            LEFT JOIN all_passes p
+              ON p.station_name = s.station_name
+             AND p.pass_date = s.stat_day
+            WHERE s.stat_day = ?
+            GROUP BY s.station_name, s.total_passes, s.success_passes, s.failed_passes, s.failed_percent
+            ORDER BY s.station_name
+            """,
+            (day_value,),
+        ).fetchall()
         result = []
         for station_name, total, success, failed, failed_percent, snr_awg in rows:
             result.append([station_name, total, success, failed, failed_percent, snr_awg or 0.0])
@@ -456,8 +607,10 @@ class DbManager:
     def get_max_snr_sum_passes(self, stat_day: date | datetime | str) -> list[SatPas]:
         """Возвращает по одному пролету с максимальной суммой SNR на станцию за день."""
         day_value = self._normalize_date(stat_day)
-        with self._connect() as conn:
-            conn.row_factory = sqlite3.Row
+        conn = self._connect()
+        prev_factory = conn.row_factory
+        conn.row_factory = sqlite3.Row
+        try:
             rows = conn.execute(
                 """
                 SELECT p.*
@@ -476,6 +629,8 @@ class DbManager:
                 """,
                 (day_value, day_value),
             ).fetchall()
+        finally:
+            conn.row_factory = prev_factory
         result = []
         for row in rows:
             sat_pass = SatPas(
@@ -509,10 +664,11 @@ if __name__ == "__main__":
     now = datetime.now()
 
     # Очистка тестовых данных, если они уже есть.
-    with db._connect() as conn:
-        conn.execute("DELETE FROM all_passes WHERE station_name = ?", (station,))
-        conn.execute("DELETE FROM commercial_passes WHERE station_name = ?", (station,))
-        conn.execute("DELETE FROM station_stats WHERE station_name = ?", (station,))
+    conn = db._connect()
+    conn.execute("DELETE FROM all_passes WHERE station_name = ?", (station,))
+    conn.execute("DELETE FROM commercial_passes WHERE station_name = ?", (station,))
+    conn.execute("DELETE FROM station_stats WHERE station_name = ?", (station,))
+    conn.commit()
 
     # Создаем первый пролет
     pass_1 = SatPas(
@@ -565,16 +721,16 @@ if __name__ == "__main__":
     assert all(p["id"] in (pass_id_1, pass_id_2) for p in passes), "pass ids mismatch"
 
     # Проверяем статистику успешных пролетов за указанный день
-    with db._connect() as conn:
-        row = conn.execute(
-            """
-            SELECT total_passes, success_passes, failed_passes, failed_percent
-            FROM station_stats
-            WHERE station_name = ?
-              AND stat_day = ?
-            """,
-            (station, now.date().isoformat()),
-        ).fetchone()
+    conn = db._connect()
+    row = conn.execute(
+        """
+        SELECT total_passes, success_passes, failed_passes, failed_percent
+        FROM station_stats
+        WHERE station_name = ?
+          AND stat_day = ?
+        """,
+        (station, now.date().isoformat()),
+    ).fetchone()
 
     assert row is not None, "stats row not found" # проверяем, что строка статистики найдена
     total_passes, success_passes, failed_passes, failed_percent = row

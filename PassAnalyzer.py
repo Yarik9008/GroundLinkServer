@@ -152,8 +152,11 @@ class PassAnalyzer:
         }
 
     # парсит строки записей лога и возвращает список с числовыми значениями
-    def parse_lines(self, log_lines: list) -> list:
-        """Парсит строки записей лога и возвращает список списков."""
+    def parse_lines(self, log_lines: list) -> Optional[list]:
+        """Парсит строки записей лога и возвращает список списков.
+
+        Возвращает None, если найдена некорректная запись.
+        """
         headers = None
         rows = []
         in_records = False
@@ -206,12 +209,9 @@ class PassAnalyzer:
                     values[0] = f"{base_date} {time_value}"
 
             if len(values) != len(headers):
-                # Если число значений меньше заголовка — пропускаем без предупреждения.
-                if len(values) < len(headers):
-                    self.logger.debug(f"skip short log line: {line}")
-                else:
-                    self.logger.warning(f"unexpected log line format: {line}")
-                continue
+                # Некорректная запись — пропускаем весь лог.
+                self.logger.warning(f"invalid log line format: {line}")
+                return None
 
             numeric_values = []
             for idx, raw_value in enumerate(values):
@@ -232,9 +232,9 @@ class PassAnalyzer:
                         break
 
             if not numeric_values:
-                # Если парсинг хотя бы одного поля не удался — строку пропускаем.
-                self.logger.warning(f"unexpected log line format: {line}")
-                continue
+                # Если парсинг хотя бы одного поля не удался — пропускаем весь лог.
+                self.logger.warning(f"invalid log line format: {line}")
+                return None
 
             # Добавляем строку с распарсенными значениями.
             rows.append(numeric_values)
@@ -381,125 +381,130 @@ class PassAnalyzer:
         }
 
     # Анализ пролета и заполнение полей SatPas
-    def analyze_passes(self, passes: Iterable[SatPas]) -> list[SatPas]:
-        """Анализирует логи пролетов и заполняет поля SatPas.
+    def analyze_pass(self, sat_pass: SatPas) -> Optional[SatPas]:
+        """Анализирует один лог пролета и заполняет поля SatPas.
 
         Args:
-            passes: Список объектов SatPas.
+            sat_pass: Объект SatPas.
 
         Returns:
-            list[SatPas]: Тот же список SatPas с заполненными полями.
+            Optional[SatPas]: Заполненный SatPas или None, если лог пропущен.
         """
-        result = []
+        # Проверка наличия лог-файла
+        if not sat_pass.log_path:
+            self.logger.warning("log file not found: log_path is empty")
+            return None
+        else:
+            self.logger.debug("Путь к лог файлу найден:")
+            self.logger.debug(sat_pass.log_path)
 
-        for sat_pass in passes:
+        lines = []
 
-            # Проверка наличия лог-файла
-            if not sat_pass.log_path:
-                self.logger.warning("log file not found: log_path is empty")
-                continue
+        # Открытие указанного лог-файла для дальнейшего чтения.
+        try:
+            with open(sat_pass.log_path, "r", encoding="utf-8") as log_file:
+                self.logger.debug("Лог-файл успешно открыт для чтения")
+                self.logger.debug(log_file.name)
+                lines = log_file.readlines()
+                log_file.close()
+
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"log file not found: {sat_pass.log_path}") from exc
+
+        except OSError as exc:
+            raise OSError(f"failed to read log file: {sat_pass.log_path}") from exc
+
+        # заполняем параметры пролета 
+        params = {}
+
+        params.update(self.extract_pass_params(lines))
+        parsed_rows = self.parse_lines(lines)
+        if parsed_rows is None:
+            self.logger.warning(f"skip log with invalid record: {sat_pass.log_path}")
+            return None
+        params.update(self.extract_snr_metrics(parsed_rows))
+
+        # Fallback: вытаскиваем station/satellite из имени файла, если нет в заголовке.
+        if (not params.get("station") or not params.get("satellite")) and sat_pass.log_path:
+            base_name = os.path.basename(sat_pass.log_path)
+            station_from_name = None
+            satellite_from_name = None
+            if "__" in base_name:
+                station_from_name, rest = base_name.split("__", 1)
             else:
-                self.logger.debug("Путь к лог файлу найден:")
-                self.logger.debug(sat_pass.log_path)
+                rest = base_name
+            rest = rest.replace("_rec.log", "").replace(".log", "")
+            parts = rest.split("_")
+            if len(parts) >= 3:
+                satellite_from_name = "_".join(parts[2:])
+            if not params.get("station") and station_from_name:
+                params["station"] = station_from_name
+            if not params.get("satellite") and satellite_from_name:
+                params["satellite"] = satellite_from_name.replace("_", " ")
 
-            # Открытие указанного лог-файла для дальнейшего чтения.
-            try:
-                with open(sat_pass.log_path, "r", encoding="utf-8") as log_file:
-                    self.logger.debug("Лог-файл успешно открыт для чтения")
-                    self.logger.debug(log_file.name)
-                    lines = log_file.readlines()
-
-            except FileNotFoundError as exc:
-                raise FileNotFoundError(f"log file not found: {sat_pass.log_path}") from exc
-
-            except OSError as exc:
-                raise OSError(f"failed to read log file: {sat_pass.log_path}") from exc
-
-            # заполняем параметры пролета 
-            params = {
-                **self.extract_pass_params(lines),
-                **self.extract_snr_metrics(self.parse_lines(lines)),
-            }
-
-            # Fallback: вытаскиваем station/satellite из имени файла, если нет в заголовке.
-            if (not params.get("station") or not params.get("satellite")) and sat_pass.log_path:
-                base_name = os.path.basename(sat_pass.log_path)
-                station_from_name = None
-                satellite_from_name = None
-                if "__" in base_name:
-                    station_from_name, rest = base_name.split("__", 1)
-                else:
-                    rest = base_name
-                rest = rest.replace("_rec.log", "").replace(".log", "")
-                parts = rest.split("_")
-                if len(parts) >= 3:
-                    satellite_from_name = "_".join(parts[2:])
-                if not params.get("station") and station_from_name:
-                    params["station"] = station_from_name
-                if not params.get("satellite") and satellite_from_name:
-                    params["satellite"] = satellite_from_name.replace("_", " ")
-
-            # Fallback: вытаскиваем дату/время из имени файла, если нет в заголовке.
-            if (not params.get("pass_date") or not params.get("start_time")) and sat_pass.log_path:
-                base_name = os.path.basename(sat_pass.log_path)
-                if "__" in base_name:
-                    _, rest = base_name.split("__", 1)
-                else:
-                    rest = base_name
-                rest = rest.replace("_rec.log", "").replace(".log", "")
-                parts = rest.split("_")
-                if len(parts) >= 2:
-                    date_part = parts[0]
-                    time_part = parts[1]
-                    try:
-                        date_obj = datetime.strptime(date_part, "%Y%m%d").date()
-                        if not params.get("pass_date"):
-                            params["pass_date"] = date_obj.isoformat()
-                        if not params.get("start_time"):
-                            params["start_time"] = datetime.strptime(
-                                f"{date_part} {time_part}", "%Y%m%d %H%M%S"
-                            )
-                    except ValueError:
-                        pass
-
-            sat_pass.pass_id = params["pass_id"]
-            sat_pass.satellite_name = params["satellite"]
-            sat_pass.pass_date = params["pass_date"]
-            sat_pass.pass_start_time = params["start_time"]
-            sat_pass.station_name = params["station"]
-            sat_pass.location = params["location"]
-            sat_pass.pass_end_time = params["stop_time"]
-            sat_pass.snr_sum = params["snr_sum"]
-            sat_pass.snr_awg = params["snr_awg"]
-            sat_pass.snr_max = params["snr_max"]
-            sat_pass.rx_start_time = params["rx_start_time"]
-            sat_pass.rx_end_time = params["rx_end_time"]
-            sat_pass.success = params["success"]
-
-            # Fallback: вытаскиваем дату/время из pass_id, если все еще нет.
-            if (sat_pass.pass_date is None or sat_pass.pass_start_time is None) and sat_pass.pass_id:
+        # Fallback: вытаскиваем дату/время из имени файла, если нет в заголовке.
+        if (not params.get("pass_date") or not params.get("start_time")) and sat_pass.log_path:
+            base_name = os.path.basename(sat_pass.log_path)
+            if "__" in base_name:
+                _, rest = base_name.split("__", 1)
+            else:
+                rest = base_name
+            rest = rest.replace("_rec.log", "").replace(".log", "")
+            parts = rest.split("_")
+            if len(parts) >= 2:
+                date_part = parts[0]
+                time_part = parts[1]
                 try:
-                    date_part, time_part, *_ = sat_pass.pass_id.split("_")
-                    if sat_pass.pass_date is None:
-                        sat_pass.pass_date = datetime.strptime(date_part, "%Y%m%d").date().isoformat()
-                    if sat_pass.pass_start_time is None:
-                        sat_pass.pass_start_time = datetime.strptime(
+                    date_obj = datetime.strptime(date_part, "%Y%m%d").date()
+                    if not params.get("pass_date"):
+                        params["pass_date"] = date_obj.isoformat()
+                    if not params.get("start_time"):
+                        params["start_time"] = datetime.strptime(
                             f"{date_part} {time_part}", "%Y%m%d %H%M%S"
                         )
-                except (ValueError, IndexError):
+                except ValueError:
                     pass
 
-            # Fallback: если есть pass_start_time, но нет pass_date.
-            if sat_pass.pass_date is None and isinstance(sat_pass.pass_start_time, datetime):
-                sat_pass.pass_date = sat_pass.pass_start_time.date().isoformat()
+        sat_pass.pass_id = params["pass_id"]
+        sat_pass.satellite_name = params["satellite"]
+        sat_pass.pass_date = params["pass_date"]
+        sat_pass.pass_start_time = params["start_time"]
+        sat_pass.station_name = params["station"]
+        sat_pass.location = params["location"]
+        sat_pass.pass_end_time = params["stop_time"]
+        sat_pass.snr_sum = params["snr_sum"]
+        sat_pass.snr_awg = params["snr_awg"]
+        sat_pass.snr_max = params["snr_max"]
+        sat_pass.rx_start_time = params["rx_start_time"]
+        sat_pass.rx_end_time = params["rx_end_time"]
+        sat_pass.success = params["success"]
 
-            result.append(sat_pass)
+        # Fallback: вытаскиваем дату/время из pass_id, если все еще нет.
+        if (sat_pass.pass_date is None or sat_pass.pass_start_time is None) and sat_pass.pass_id:
+            try:
+                date_part, time_part, *_ = sat_pass.pass_id.split("_")
+                if sat_pass.pass_date is None:
+                    sat_pass.pass_date = datetime.strptime(date_part, "%Y%m%d").date().isoformat()
+                if sat_pass.pass_start_time is None:
+                    sat_pass.pass_start_time = datetime.strptime(
+                        f"{date_part} {time_part}", "%Y%m%d %H%M%S"
+                    )
+            except (ValueError, IndexError):
+                pass
 
-        return result
+        # Fallback: если есть pass_start_time, но нет pass_date.
+        if sat_pass.pass_date is None and isinstance(sat_pass.pass_start_time, datetime):
+            sat_pass.pass_date = sat_pass.pass_start_time.date().isoformat()
+
+        return sat_pass
 
 
 if __name__ == "__main__":
     LOG_PATH  = "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\server_logs\\"
+    LOGS_ROOT = "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs"
+
+    logger = Logger(path_log=LOG_PATH, log_level="debug", logger_name="ground_link_analyzer")
+    analyzer = PassAnalyzer(logger=logger)
 
     #test 1 20260127_031121_FENGYUN_3D
     print("test 1 20260127_031121_FENGYUN_3D")
@@ -511,10 +516,8 @@ if __name__ == "__main__":
     )
     if os.path.exists(sample_log):
 
-        logger = Logger(path_log=LOG_PATH, log_level="debug", logger_name="ground_link_analyzer")
-        analyzer = PassAnalyzer(logger=logger)
         test_pass = SatPas(log_path=sample_log)
-        analyzed = analyzer.analyze_passes([test_pass])
+        analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed)
 
     else:
@@ -533,7 +536,7 @@ if __name__ == "__main__":
     if os.path.exists(sample_log):
 
         test_pass = SatPas(log_path=sample_log)
-        analyzed = analyzer.analyze_passes([test_pass])
+        analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed)
 
     else:
@@ -553,7 +556,7 @@ if __name__ == "__main__":
     if os.path.exists(sample_log):
 
         test_pass = SatPas(log_path=sample_log)
-        analyzed = analyzer.analyze_passes([test_pass])
+        analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed)
 
     else:
@@ -573,9 +576,26 @@ if __name__ == "__main__":
     if os.path.exists(sample_log):
 
         test_pass = SatPas(log_path=sample_log)
-        analyzed = analyzer.analyze_passes([test_pass])
+        analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed) 
 
     else:
 
         print(f"test log not found: {sample_log}")
+
+    # test 5: анализ всех лог-файлов из папки passes_logs
+    print()
+    print("test 5 анализ всех лог файлов из passes_logs")
+    print("--------------------------------")
+    print()
+
+    all_passes = []
+    for root, _, files in os.walk(LOGS_ROOT):
+        for filename in files:
+            if filename.lower().endswith(".log"):
+                analyzer.logger.debug(f"analyze log file: {os.path.join(root, filename)}")
+                all_passes.append(SatPas(log_path=os.path.join(root, filename)))
+                analyzed = analyzer.analyze_pass(test_pass)
+                print
+                print(analyzed)
+                print()

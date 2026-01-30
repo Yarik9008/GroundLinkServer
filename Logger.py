@@ -26,6 +26,8 @@ class Logger:
         # Имя логгера: берём указанное или имя текущего модуля.
         logger_name = logger_name or __name__
         self.logs = logging.getLogger(logger_name)
+        if self.logs.handlers:
+            self.logs.handlers.clear()
         self.logs.setLevel(log_level_map[log_level])
 
         # Проверяем, что директория path_log существует.
