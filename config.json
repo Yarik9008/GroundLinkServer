@@ -1,0 +1,14 @@
+{
+  "email": {
+    "enabled": false,
+    "smtp_server": "smtp.yandex.ru",
+    "smtp_port": 465,
+    "sender_email": "",
+    "sender_password": "",
+    "recipient_email": "",
+    "cc": "",
+    "subject": "Ежедневное письмо",
+    "attach_report": true
+  },
+  "stations_for_email": []
+}
