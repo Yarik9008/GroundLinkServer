@@ -55,8 +55,8 @@
     "api_id": 25004944,
     "api_hash": "3d29770555fbca4b0ea880003ed892bc",
     "channel": "https://t.me/+Lb1SuoOUlodhYTli",
-    "session": "/root/lorett/GroundLinkMonitorServer/telegram",
-    "db_path": "/root/lorett/GroundLinkMonitorServer/comm_passes.db"
+    "session": "/root/lorett/GroundLinkServer/telegram",
+    "db_path": "/root/lorett/GroundLinkServer/comm_passes.db"
   },
   "stations": [
     {

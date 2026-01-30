@@ -1,0 +1,16 @@
+ [Unit]
+ Description=GroundLinkServer scheduler
+ After=network-online.target
+ Wants=network-online.target
+
+ [Service]
+ Type=simple
+ User=root
+ WorkingDirectory=/root/lorett/GroundLinkServer
+ ExecStart=/usr/bin/python3 /root/lorett/GroundLinkServer/GroundLinkServer.py --sch
+ Restart=on-failure
+ RestartSec=5
+ Environment=PYTHONUNBUFFERED=1
+
+ [Install]
+ WantedBy=multi-user.target

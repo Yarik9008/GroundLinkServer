@@ -73,6 +73,12 @@ class GraphGenerator:
                 ax.text(x[idx], min(99.5, v + 1.5), f"{v:.1f}%", ha="center", va="bottom", fontsize=7, color="#212121")
         fig.tight_layout()
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if output_path.exists():
+                output_path.unlink()
+        except OSError as exc:
+            if self.logger:
+                self.logger.warning(f"failed to remove old graph: {output_path} ({exc})")
         fig.savefig(output_path, bbox_inches="tight")
         plt.close(fig)
         return output_path
@@ -135,6 +141,7 @@ class GraphGenerator:
         target_date: str,
         output_path: Path,
         days: int = 7,
+        up_to_datetime: Optional[datetime] = None,
     ) -> Optional[Path]:
         """
         Генерирует PNG график процента не принятых коммерческих пролётов за последние N дней.
@@ -146,7 +153,10 @@ class GraphGenerator:
             points: List[Tuple[str, Optional[float]]] = []
             for i in range(days - 1, -1, -1):
                 day = date_end - timedelta(days=i)
-                end_of_day = datetime.combine(day, time(23, 59, 59))
+                if up_to_datetime is not None and day == date_end:
+                    end_of_day = up_to_datetime
+                else:
+                    end_of_day = datetime.combine(day, time(23, 59, 59))
                 _, totals = self.db_manager.get_commercial_passes_stats_by_station(
                     day, up_to_datetime=end_of_day
                 )

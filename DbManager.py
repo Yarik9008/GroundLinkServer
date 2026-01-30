@@ -972,6 +972,7 @@ class DbManager:
 if __name__ == "__main__":
     # Простой тестовый сценарий, аналогичный примерам в EusLogDownloader.py
     # Используем основную БД проекта.
+    BASE_DIR = Path("/root/lorett/GroundLinkServer")
     logger = Logger(path_log="db_manager", log_level="info")
     db = DbManager(logger=logger)
 
@@ -996,9 +997,9 @@ if __name__ == "__main__":
         rx_start_time=now,
         rx_end_time=now,
         log_url="http://example.com/logs/SAT-1.log",
-        log_path=r"C:\logs\SAT-1.log",
+        log_path=str(BASE_DIR / "logs" / "SAT-1.log"),
         graph_url="http://example.com/graphs/SAT-1.png",
-        graph_path=r"C:\graphs\SAT-1.png",
+        graph_path=str(BASE_DIR / "graphs" / "SAT-1.png"),
         success=True,
     )
 
@@ -1012,9 +1013,9 @@ if __name__ == "__main__":
         rx_start_time=now,
         rx_end_time=now,
         log_url="http://example.com/logs/SAT-2.log",
-        log_path=r"C:\logs\SAT-2.log",
+        log_path=str(BASE_DIR / "logs" / "SAT-2.log"),
         graph_url="http://example.com/graphs/SAT-2.png",
-        graph_path=r"C:\graphs\SAT-2.png",
+        graph_path=str(BASE_DIR / "graphs" / "SAT-2.png"),
         success=False,
     )
     # Добавляем пролета в базу данных

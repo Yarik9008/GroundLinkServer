@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 import re
+from pathlib import Path
 from datetime import datetime
 from sqlite3 import paramstyle
 from typing import Iterable, Optional
@@ -69,10 +70,10 @@ class PassAnalyzer:
             # извлекаем время старта
             elif line.startswith("#Start time:"):
                 raw_value = line.split(":", 1)[1].strip()
-                try:
-                    start_time = datetime.fromisoformat(raw_value)
+                start_time = self._parse_datetime(raw_value)
+                if isinstance(start_time, datetime):
                     pass_date = start_time.date().isoformat()
-                except ValueError:
+                else:
                     start_time = raw_value
                     try:
                         pass_date = datetime.fromisoformat(raw_value[:10]).date().isoformat()
@@ -116,10 +117,8 @@ class PassAnalyzer:
             # извлекаем время окончания приема
             elif line.startswith("#Closed at:"):
                 raw_value = line.split(":", 1)[1].strip()
-                try:
-                    stop_time = datetime.fromisoformat(raw_value)
-
-                except ValueError:
+                stop_time = self._parse_datetime(raw_value)
+                if stop_time is None:
                     stop_time = raw_value
 
         # Проверяем последнюю строку данных и при необходимости обновляем stop_time.
@@ -127,10 +126,7 @@ class PassAnalyzer:
             last_line = data_lines[-1].split()
             if len(last_line) >= 2:
                 raw_time = f"{last_line[0]} {last_line[1]}"
-                try:
-                    last_time = datetime.fromisoformat(raw_time)
-                except ValueError:
-                    last_time = None
+                last_time = self._parse_datetime(raw_time)
 
                 if last_time is not None:
                     if isinstance(stop_time, datetime):
@@ -150,6 +146,31 @@ class PassAnalyzer:
             "location": location,
             "stop_time": stop_time,
         }
+
+    def _parse_datetime(self, value: str) -> Optional[datetime]:
+        """Парсит дату/время с дробными секундами переменной длины."""
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+
+        sep = "T" if "T" in value else " "
+        if sep not in value:
+            return None
+        date_part, time_part = value.split(sep, 1)
+
+        if "." in time_part:
+            base, frac = time_part.split(".", 1)
+            frac = (frac + "000000")[:6]
+            normalized = f"{date_part} {base}.{frac}"
+            try:
+                return datetime.strptime(normalized, "%Y-%m-%d %H:%M:%S.%f")
+            except ValueError:
+                return None
+        try:
+            return datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
 
     # парсит строки записей лога и возвращает список с числовыми значениями
     def parse_lines(self, log_lines: list) -> Optional[list]:
@@ -187,11 +208,8 @@ class PassAnalyzer:
             if line.startswith("#"):
                 if line.startswith("#Start time:"):
                     raw_value = line.split(":", 1)[1].strip()
-                    try:
-                        start_dt = datetime.fromisoformat(raw_value)
-                        base_date = start_dt.date().isoformat()
-                    except ValueError:
-                        base_date = None
+                    start_dt = self._parse_datetime(raw_value)
+                    base_date = start_dt.date().isoformat() if isinstance(start_dt, datetime) else None
                 if line.startswith("#Time"):
                     # Считываем заголовок таблицы и включаем режим чтения записей.
                     header_line = line[1:].strip()
@@ -231,13 +249,12 @@ class PassAnalyzer:
             numeric_values = []
             for idx, raw_value in enumerate(values):
                 if headers[idx] == "Time":
-                    try:
-                        # Время парсим в datetime.
-                        dt_value = datetime.fromisoformat(raw_value)
-                        numeric_values.append(dt_value)
-                    except ValueError:
+                    # Время парсим в datetime.
+                    dt_value = self._parse_datetime(raw_value)
+                    if dt_value is None:
                         numeric_values = []
                         break
+                    numeric_values.append(dt_value)
                 else:
                     try:
                         # Остальные поля пытаемся привести к float.
@@ -518,8 +535,9 @@ class PassAnalyzer:
 
 
 if __name__ == "__main__":
-    LOG_PATH  = "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\server_logs\\"
-    LOGS_ROOT = "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs"
+    BASE_DIR = Path("/root/lorett/GroundLinkServer")
+    LOG_PATH = str(BASE_DIR / "server_logs")
+    LOGS_ROOT = str(BASE_DIR / "passes_logs")
 
     logger = Logger(path_log=LOG_PATH, log_level="debug", logger_name="ground_link_analyzer")
     analyzer = PassAnalyzer(logger=logger)
@@ -530,11 +548,17 @@ if __name__ == "__main__":
     print()
     # Мини-тест аналитики на одном лог-файле, если он существует.
     sample_log = (
-        "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs\\2026\\01\\27\\R4.6S_Anadyr\\R4.6S_Anadyr__20260127_031121_FENGYUN_3D_rec.log"
+        BASE_DIR
+        / "passes_logs"
+        / "2026"
+        / "01"
+        / "27"
+        / "R4.6S_Anadyr"
+        / "R4.6S_Anadyr__20260127_031121_FENGYUN_3D_rec.log"
     )
-    if os.path.exists(sample_log):
+    if sample_log.exists():
 
-        test_pass = SatPas(log_path=sample_log)
+        test_pass = SatPas(log_path=str(sample_log))
         analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed)
 
@@ -549,11 +573,17 @@ if __name__ == "__main__":
     print()
 
     sample_log = (
-        "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs\\2026\\01\\27\\PlanumMoscow\\PlanumMoscow__20260127_072847_METEOR-M2_3_rec.log"
+        BASE_DIR
+        / "passes_logs"
+        / "2026"
+        / "01"
+        / "27"
+        / "PlanumMoscow"
+        / "PlanumMoscow__20260127_072847_METEOR-M2_3_rec.log"
     )
-    if os.path.exists(sample_log):
+    if sample_log.exists():
 
-        test_pass = SatPas(log_path=sample_log)
+        test_pass = SatPas(log_path=str(sample_log))
         analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed)
 
@@ -568,12 +598,19 @@ if __name__ == "__main__":
     print("--------------------------------")
     print()
 
-    sample_log = ( "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs\\2026\\01\\29\\R3.2S-Naryan-Mar\\R3.2S-Naryan-Mar__20260129_070456_NOAA_20_JPSS-1_rec.log"
+    sample_log = (
+        BASE_DIR
+        / "passes_logs"
+        / "2026"
+        / "01"
+        / "29"
+        / "R3.2S-Naryan-Mar"
+        / "R3.2S-Naryan-Mar__20260129_070456_NOAA_20_JPSS-1_rec.log"
     )
 
-    if os.path.exists(sample_log):
+    if sample_log.exists():
 
-        test_pass = SatPas(log_path=sample_log)
+        test_pass = SatPas(log_path=str(sample_log))
         analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed)
 
@@ -589,11 +626,17 @@ if __name__ == "__main__":
     print()
 
     sample_log = (
-        "C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs\\2026\\01\\29\\PlanumMoscow\\PlanumMoscow__20260129_082629_METOP-C_rec.log"
+        BASE_DIR
+        / "passes_logs"
+        / "2026"
+        / "01"
+        / "29"
+        / "PlanumMoscow"
+        / "PlanumMoscow__20260129_082629_METOP-C_rec.log"
     )
-    if os.path.exists(sample_log):
+    if sample_log.exists():
 
-        test_pass = SatPas(log_path=sample_log)
+        test_pass = SatPas(log_path=str(sample_log))
         analyzed = analyzer.analyze_pass(test_pass)
         print(analyzed) 
 

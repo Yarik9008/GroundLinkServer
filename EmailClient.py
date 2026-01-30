@@ -14,22 +14,7 @@ from Logger import Logger
 
 
 
-    # "cc": [
-    #   "vegershenzon@gmail.com",
-    #   "lpmrfentazis@mail.ru",
-    #   "edanilov.18@yandex.ru",
-    #   "yunina@lorett.org",
-    #   "project@lorett.org",
-    #   "m.uzhakhova@lorett.org",
-    #   "lv2005@mail.ru",
-    #   "a.v.shumilin@yandex.ru",
-    #   "k.sevinyan@lorett.org",
-    #   "var@list.ru",
-    #   "m.akhriev@lorett.org",
-    #   "artemiypanarin@yandex.ru",
-    #   "m.klyshkin@ya.ru",
-    #   "i.kurakina@lorett.org"
-    # ] ogershenzon@gmail.com
+# ogershenzon@gmail.com
 
 
 class EmailClient:
@@ -113,6 +98,8 @@ class EmailClient:
         cc_raw = (
             email_cfg.get("cc")
             or email_cfg.get("cc_emails")
+            or email_cfg.get("сс")
+            or email_cfg.get("СС")
             or os.getenv("EMAIL_CC")
             or ""
         )

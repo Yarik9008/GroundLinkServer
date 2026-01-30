@@ -7,8 +7,11 @@ from pathlib import Path
 
 from telethon import TelegramClient, events
 
+BASE_DIR = Path("/root/lorett/GroundLinkServer")
+
+
 def load_telegram_comm_config() -> dict:
-    config_path = Path("/root/lorett/GroundLinkMonitorServer/config.json")
+    config_path = BASE_DIR / "config.json"
     if not config_path.exists():
         return {}
     with config_path.open("r", encoding="utf-8") as handle:
@@ -20,8 +23,8 @@ _comm_cfg = load_telegram_comm_config()
 API_ID = int(os.getenv("TG_API_ID", _comm_cfg.get("api_id", 25004944)))
 API_HASH = os.getenv("TG_API_HASH", _comm_cfg.get("api_hash", "3d29770555fbca4b0ea880003ed892bc"))
 CHANNEL = os.getenv("TG_CHANNEL", _comm_cfg.get("channel", "https://t.me/+Lb1SuoOUlodhYTli"))
-SESSION = os.getenv("TG_SESSION", _comm_cfg.get("session", "/root/lorett/GroundLinkMonitorServer/telegram"))
-DB_PATH = os.getenv("COMM_DB_PATH", _comm_cfg.get("db_path", "/root/lorett/GroundLinkMonitorServer/comm_passes.db"))
+SESSION = os.getenv("TG_SESSION", _comm_cfg.get("session", str(BASE_DIR / "telegram")))
+DB_PATH = os.getenv("COMM_DB_PATH", _comm_cfg.get("db_path", str(BASE_DIR / "comm_passes.db")))
 
 
 def split_by_double_newline(text: str) -> list[str]:

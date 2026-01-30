@@ -196,72 +196,27 @@ class GroundLinkServer:
         else:
             self.logger.info("Telegram: синхронизация не выполнена (нет настроек или telethon)")
 
-        # путь к каталогу для сохранения логов
-        base_dir = os.path.dirname(__file__)
-        passes_logs_dir = os.path.join(base_dir, "passes_logs")
-        # Загружаем HTML страницу со всем диапазоном дат.
-        # дата начала
-        start_dt = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
-        # дата конца
-        end_dt = datetime.combine(end_day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        # Проверяем наличие данных за последние 7 дней и догружаем при необходимости.
+        lookback_start = end_day - timedelta(days=6)
+        missing_days = [
+            day
+            for day in (lookback_start + timedelta(days=i) for i in range(7))
+            if not self.db_manager.get_daily_success_stats(day)
+        ]
+        if missing_days:
+            missing_start = min(missing_days)
+            missing_end = max(missing_days)
+            if not (start_day <= missing_start and end_day >= missing_end):
+                self.logger.info(
+                    f"backfill missing stats for {missing_start}..{missing_end}"
+                )
+                self._download_and_analyze_range(missing_start, missing_end)
+            else:
+                self.logger.info(
+                    f"missing stats fall within requested range: {missing_start}..{missing_end}"
+                )
 
-        # параметры даты
-        params = (start_dt, end_dt)
-
-        try:
-            # загружаем HTML страницу со всем диапазоном дат
-            page_passes_all = self.eus.load_html_and_parse(params=params)
-        except TimeoutError as exc:
-            self.logger.warning(f"load_html_and_parse timeout: {exc}")
-            return
-        except Exception as exc:
-            self.logger.exception("load_html_and_parse failed", exc_info=exc)
-            return
-
-        all_passes = []
-
-        for passes in page_passes_all.values():
-            all_passes.extend(passes)
-
-        if not all_passes:
-            self.logger.info("no passes found for date range")
-            return
-
-        downloaded = []
-        for station_name, passes in page_passes_all.items():
-            if not passes:
-                continue
-            try:
-                t0 = time.perf_counter()
-                station_results = self.eus.download_logs_file(passes, out_dir=passes_logs_dir)
-                elapsed = time.perf_counter() - t0
-                self.logger.info(f"logs download time: station={station_name} time={elapsed:.2f}s")
-                downloaded.extend(station_results)
-            except Exception as exc:
-                self.logger.exception(f"download_logs_file failed for station {station_name}", exc_info=exc)
-                continue
-
-        # анализируем пролета
-        analyzed = [p for p in (self.analyzer.analyze_pass(item) for item in downloaded) if p is not None]
-
-        # список для хранения пролетов
-        ready = []
-        for sat_pass in analyzed:
-            # если лог-путь не найден, то пропускаем
-            if not sat_pass.log_path:
-                continue
-            # если дата или время начала не найдены, то пропускаем
-            if sat_pass.pass_date is None or sat_pass.pass_start_time is None:
-                continue
-            # добавляем пролета в список
-            ready.append(sat_pass)
-
-        if ready:
-            try:
-                inserted = self.db_manager.add_passes_batch(ready)
-                self.logger.info(f"batch insert complete: inserted={inserted}")
-            except Exception as exc:
-                self.logger.exception("batch insert failed", exc_info=exc)
+        self._download_and_analyze_range(start_day, end_day)
 
         # Выводим статистику по дням за указанный диапазон
         current_day = start_day
@@ -368,7 +323,7 @@ class GroundLinkServer:
                     )
                     comm_7d_path = graphs_dir / "comm_unsuccessful_7d.png"
                     generated_comm_7d = self.graph_generator.generate_comm_unsuccessful_7d(
-                        target_date, comm_7d_path, days=7
+                        target_date, comm_7d_path, days=7, up_to_datetime=now_utc
                     )
                     comm_summary_7d_chart_path = (
                         generated_comm_7d if generated_comm_7d and generated_comm_7d.exists() else None
@@ -405,10 +360,80 @@ class GroundLinkServer:
             current_day += timedelta(days=1)
 
 
+    def _download_and_analyze_range(self, start_day, end_day) -> None:
+        # путь к каталогу для сохранения логов
+        base_dir = os.path.dirname(__file__)
+        passes_logs_dir = os.path.join(base_dir, "passes_logs")
+        # Загружаем HTML страницу со всем диапазоном дат.
+        # дата начала
+        start_dt = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
+        # дата конца
+        end_dt = datetime.combine(end_day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # параметры даты
+        params = (start_dt, end_dt)
+
+        try:
+            # загружаем HTML страницу со всем диапазоном дат
+            page_passes_all = self.eus.load_html_and_parse(params=params)
+        except TimeoutError as exc:
+            self.logger.warning(f"load_html_and_parse timeout: {exc}")
+            return
+        except Exception as exc:
+            self.logger.exception("load_html_and_parse failed", exc_info=exc)
+            return
+
+        all_passes = []
+
+        for passes in page_passes_all.values():
+            all_passes.extend(passes)
+
+        if not all_passes:
+            self.logger.info("no passes found for date range")
+            return
+
+        downloaded = []
+        for station_name, passes in page_passes_all.items():
+            if not passes:
+                continue
+            try:
+                t0 = time.perf_counter()
+                station_results = self.eus.download_logs_file(passes, out_dir=passes_logs_dir)
+                elapsed = time.perf_counter() - t0
+                self.logger.info(f"logs download time: station={station_name} time={elapsed:.2f}s")
+                downloaded.extend(station_results)
+            except Exception as exc:
+                self.logger.exception(f"download_logs_file failed for station {station_name}", exc_info=exc)
+                continue
+
+        # анализируем пролета
+        analyzed = [p for p in (self.analyzer.analyze_pass(item) for item in downloaded) if p is not None]
+
+        # список для хранения пролетов
+        ready = []
+        for sat_pass in analyzed:
+            # если лог-путь не найден, то пропускаем
+            if not sat_pass.log_path:
+                continue
+            # если дата или время начала не найдены, то пропускаем
+            if sat_pass.pass_date is None or sat_pass.pass_start_time is None:
+                continue
+            # добавляем пролета в список
+            ready.append(sat_pass)
+
+        if ready:
+            try:
+                inserted = self.db_manager.add_passes_batch(ready)
+                self.logger.info(f"batch insert complete: inserted={inserted}")
+            except Exception as exc:
+                self.logger.exception("batch insert failed", exc_info=exc)
+
+
 if __name__ == "__main__":
 
     # путь к каталогу для сохранения логов
-    PATH_LOG = "C:/Users/Yarik/YandexDisk/Engineering_local/Soft/GroundLinkMonitorServer/server_logs/"
+    BASE_DIR = Path("/root/lorett/GroundLinkServer")
+    PATH_LOG = str(BASE_DIR / "server_logs") + os.sep
 
     # парсинг аргументов командной строки
     parser = argparse.ArgumentParser()

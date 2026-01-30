@@ -6,12 +6,15 @@ import aiohttp
 import shutil
 import tempfile
 import atexit
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import urlopen
 from typing import Optional, Tuple
 from Logger import Logger
 from SatPass import SatPas
+
+BASE_DIR = Path("/root/lorett/GroundLinkServer")
 
 
 class EusLogDownloader:
@@ -486,10 +489,9 @@ class EusLogDownloader:
         image_name = log_filename.replace(".log", ".png").replace(" ", "_")
         # создаем путь к файлу
         path = os.path.join(out_dir, image_name)
-        # проверяем, если файл уже существует и не пустой, то пропускаем рендер
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            self.logger.debug(f"graph exists, skip: {path}")
-            return path
+        # если файл уже существует, перезаписываем его новым графиком
+        if os.path.exists(path):
+            self.logger.debug(f"graph exists, overwrite: {path}")
         # строим полный URL для графика
         view_url = self._normalize_view_url(view_url_or_filename)
         self.logger.debug(f"graph download start: {view_url} -> {path}")
@@ -520,10 +522,9 @@ class EusLogDownloader:
 
                         os.environ["PYPPETEER_SKIP_CHROMIUM_DOWNLOAD"] = "1"
                         chrome_paths = [
-                          r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                            os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-                            r"C:\Program Files\Chromium\Application\chrome.exe",
+                            str(BASE_DIR / "bin" / "chrome"),
+                            str(BASE_DIR / "bin" / "chromium"),
+                            str(BASE_DIR / "chrome" / "chrome"),
                         ]
                         executable_path = None
                         for chrome_path in chrome_paths:
@@ -1017,7 +1018,7 @@ if __name__ == "__main__":
         if passes:
             results = portal.download_logs_file(
                 passes,
-                out_dir="C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_logs",
+                out_dir=str(BASE_DIR / "passes_logs"),
             )
             ok = sum(1 for r in results if r.log_path)
             fail = sum(1 for r in results if r.log_path is None)
@@ -1031,7 +1032,7 @@ if __name__ == "__main__":
     #     if passes:
     #         results = portal.download_graphs_file(
     #             passes,
-    #             out_dir="C:\\Users\\Yarik\\YandexDisk\\Engineering_local\\Soft\\GroundLinkMonitorServer\\passes_graphs",
+    #             out_dir=str(BASE_DIR / "passes_graphs"),
     #         )
     #         ok = sum(1 for r in results if r.graph_path)
     #         fail = sum(1 for r in results if r.graph_path is None)
