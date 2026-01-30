@@ -1,0 +1,27 @@
+2026-01-30 20:35:06,834 : INFO : EUS : Start logging
+2026-01-30 20:35:06,834 : INFO : EUS : EusLogPortal initialized
+2026-01-30 20:35:06,837 : INFO : EUS : load_html_and_parse: start=2026-01-30T00:00:00+00:00 end=2026-01-31T00:00:00+00:00 months=1
+2026-01-30 20:35:06,918 : INFO : EUS : html loaded: url=http://eus.lorett.org/eus/logs_list.html range=2026-01-30..2026-01-30 bytes=31274 time=0.08s
+2026-01-30 20:35:07,000 : INFO : EUS : html loaded: url=http://eus.lorett.org/eus/logs.html range=2026-01-30..2026-01-30 bytes=50134 time=0.08s
+2026-01-30 20:35:07,079 : INFO : EUS : log download stats: ok=1 skipped=12 failed=0
+2026-01-30 20:35:07,089 : INFO : EUS : log download stats: ok=0 skipped=30 failed=0
+2026-01-30 20:35:07,102 : INFO : EUS : log download stats: ok=0 skipped=58 failed=0
+2026-01-30 20:35:07,105 : INFO : EUS : log download stats: ok=0 skipped=5 failed=0
+2026-01-30 20:35:07,108 : INFO : EUS : log download stats: ok=0 skipped=4 failed=0
+2026-01-30 20:35:07,112 : INFO : EUS : log download stats: ok=0 skipped=3 failed=0
+2026-01-30 20:35:07,115 : INFO : EUS : log download stats: ok=0 skipped=1 failed=0
+2026-01-30 20:35:07,126 : INFO : EUS : log download stats: ok=0 skipped=16 failed=0
+2026-01-30 20:35:07,139 : INFO : EUS : log download stats: ok=0 skipped=25 failed=0
+2026-01-30 20:35:07,147 : INFO : EUS : log download stats: ok=0 skipped=29 failed=0
+2026-01-30 20:35:07,154 : INFO : EUS : log download stats: ok=0 skipped=32 failed=0
+2026-01-30 20:35:07,160 : INFO : EUS : log download stats: ok=0 skipped=26 failed=0
+2026-01-30 20:35:07,165 : INFO : EUS : log download stats: ok=0 skipped=24 failed=0
+2026-01-30 20:35:13,459 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\R2M6_AANII_01\R2M6_AANII_01__20260130_023039_FENGYUN_3D_rec.png
+2026-01-30 20:35:14,084 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\R3.2S-Naryan-Mar\R3.2S-Naryan-Mar__20260130_004530_FENGYUN_3D_rec.png
+2026-01-30 20:35:14,150 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\R2.0S_Moscow\R2.0S_Moscow__20260130_003131_AQUA_rec.png
+2026-01-30 20:35:14,207 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\R3.2S_Murmansk\R3.2S_Murmansk__20260130_022700_FENGYUN_3D_rec.png
+2026-01-30 20:35:14,272 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\PlanumMoscow\PlanumMoscow__20260130_061917_METEOR-M2_3_rec.png
+2026-01-30 20:35:17,584 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\Regia\Regia__20260130_114503_AQUA_rec.png
+2026-01-30 20:35:17,822 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\R4.6S_Anadyr\R4.6S_Anadyr__20260130_155957_FENGYUN_3D_rec.png
+2026-01-30 20:35:17,929 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\planumMaritime01\planumMaritime01__20260130_011336_METEOR-M2_4_rec.png
+2026-01-30 20:35:17,979 : INFO : EUS : graph saved: c:\Users\Yarik\YandexDisk\Engineering_local\Soft\GroundLinkMonitorServer\report\2026\01\30\T1\T1__20260130_041306_FENGYUN_3E_rec.png

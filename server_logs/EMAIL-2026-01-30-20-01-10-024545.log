@@ -1,0 +1,2 @@
+2026-01-30 20:01:10,025 : INFO : EMAIL : Start logging
+2026-01-30 20:01:11,689 : WARNING : EMAIL : Email: не заданы sender/password/recipients — отправка пропущена

@@ -1,14 +1,54 @@
 {
+  "telegram": {
+    "api_id": 25004944,
+    "api_hash": "3d29770555fbca4b0ea880003ed892bc",
+    "channel": "https://t.me/+Lb1SuoOUlodhYTli",
+    "session": "telegram",
+    "station_aliases": {
+      "MUR": "R3.2S_Murmansk",
+      "ANA": "R4.6S_Anadyr"
+    },
+
+    "satellite_aliases": {
+      "03D": "",
+      "B01": "JL1KF02B01",
+      "B02": "JL1KF02B02",
+      "B03": "JL1KF02B03",
+      "B04": "JL1KF02B04",
+      "B05": "JL1KF02B05",
+      "B06": "JL1KF02B06",
+      "B07": "JL1KF02B07",
+      "TY-39": "TY-39",
+      "TY-42": "TY-42",
+      "WH01": "WH01",
+      "ZK01": "ZK01",
+      "ZK05": "ZK05"
+    }
+  },
+
+  "report_dir": "report",
+
   "email": {
-    "enabled": false,
+    "enabled": true,
     "smtp_server": "smtp.yandex.ru",
     "smtp_port": 465,
-    "sender_email": "",
-    "sender_password": "",
-    "recipient_email": "",
-    "cc": "",
-    "subject": "Ежедневное письмо",
+    "sender_email": "iaroslav.muhatdinov@yandex.ru",
+    "sender_password": "nxrxodmvlgkreewp",
+    "recipient_email": "eyenot2@yandex.ru",
+    "debug_recipient": "eyenot2@yandex.ru",
+    "subject": "Сводка работы станций",
     "attach_report": true
   },
-  "stations_for_email": []
+
+  "stations_for_email": [
+    "PlanumMoscow",
+    "planumMaritime01",
+    "R2.0S_Moscow",
+    "R2M6_AANII_01",
+    "R3.2S-Naryan-Mar",
+    "R3.2S_Murmansk",
+    "R4.6S_Anadyr",
+    "Regia",
+    "T1"
+  ]
 }

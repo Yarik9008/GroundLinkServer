@@ -3,6 +3,7 @@ import re
 import smtplib
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Tuple
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -10,6 +11,25 @@ from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 
 from Logger import Logger
+
+
+
+    # "cc": [
+    #   "vegershenzon@gmail.com",
+    #   "lpmrfentazis@mail.ru",
+    #   "edanilov.18@yandex.ru",
+    #   "yunina@lorett.org",
+    #   "project@lorett.org",
+    #   "m.uzhakhova@lorett.org",
+    #   "lv2005@mail.ru",
+    #   "a.v.shumilin@yandex.ru",
+    #   "k.sevinyan@lorett.org",
+    #   "var@list.ru",
+    #   "m.akhriev@lorett.org",
+    #   "artemiypanarin@yandex.ru",
+    #   "m.klyshkin@ya.ru",
+    #   "i.kurakina@lorett.org"
+    # ] ogershenzon@gmail.com
 
 
 class EmailClient:
@@ -21,10 +41,11 @@ class EmailClient:
         - отправка письма с вложениями и inline-изображениями.
     """
 
-    def __init__(self, logger: Logger) -> None:
+    def __init__(self, logger: Logger, config: Optional[Dict[str, Any]] = None) -> None:
         if logger is None:
             raise ValueError("logger is required")
         self.logger = logger
+        self.config = (config or {}) if isinstance(config, dict) else {}
 
     def _load_email_defaults_from_test_email(self) -> Dict[str, Any]:
         """Пытается загрузить SMTP-настройки по умолчанию из test_email.py."""
@@ -41,10 +62,11 @@ class EmailClient:
         except Exception:
             return {}
 
-    def get_email_settings(self, config: Dict[str, Any], debug_recipient: Optional[str] = None) -> Dict[str, Any]:
-        """Возвращает настройки email с учетом config/env/test_email."""
+    def get_email_settings(self, config: Optional[Dict[str, Any]] = None, debug_recipient: Optional[str] = None) -> Dict[str, Any]:
+        """Возвращает настройки email с учетом config/env/test_email. Если config не передан — используется конфиг из инициализации."""
         defaults = self._load_email_defaults_from_test_email()
-        email_cfg = (config or {}).get("email", {}) if isinstance(config, dict) else {}
+        cfg = config if config is not None else self.config
+        email_cfg = (cfg or {}).get("email", {}) if isinstance(cfg, dict) else {}
 
         enabled_raw = email_cfg.get("enabled", os.getenv("EMAIL_ENABLED"))
         if enabled_raw is None:
@@ -137,9 +159,37 @@ class EmailClient:
         comm_totals: Optional[Dict[str, int]] = None,
         comm_summary_7d_chart_path: Optional[Path] = None,
         comm_links: Optional[Dict[str, List[str]]] = None,
+        comm_not_received_list: Optional[List[Tuple[str, str, str, str, str]]] = None,
     ) -> Tuple[str, Dict[str, Path]]:
-        """Формирует HTML письмо и набор inline-изображений."""
+        """Формирует HTML письмо — точная копия test/old_GroundLinkServer.build_stats_email_body."""
         date_display = f"{target_date[6:8]}.{target_date[4:6]}.{target_date[0:4]}"
+        inline_images: Dict[str, Path] = {}
+
+        # Данные как в old_GroundLinkServer: files, successful_passes, unsuccessful_passes (с fallback для total_files)
+        def _files(s: Dict[str, Any]) -> int:
+            return int(s.get("files", s.get("total_files", 0)) or 0)
+
+        def _successful(s: Dict[str, Any]) -> int:
+            v = s.get("successful_passes")
+            if v is not None:
+                return int(v) if v else 0
+            return _files(s) - _unsuccessful(s)
+
+        def _unsuccessful(s: Dict[str, Any]) -> int:
+            return int(s.get("unsuccessful_passes", 0) or 0)
+
+        # Сортируем станции по возрастанию процента пустых пролетов
+        def _unsuccessful_pct(s: Dict[str, Any]) -> float:
+            f = _files(s)
+            if f <= 0:
+                return 100.0
+            return (_unsuccessful(s) / f) * 100.0
+
+        sorted_stations = sorted(
+            all_results.items(),
+            key=lambda x: _unsuccessful_pct(x[1]),
+            reverse=False,
+        )
 
         html_lines = [
             "<!DOCTYPE html>",
@@ -233,6 +283,9 @@ class EmailClient:
             "  .adaptive-table .number { text-align: right; font-variant-numeric: tabular-nums; }",
             "  .adaptive-table .total-row { background-color: #f5f5f7; font-weight: 600; }",
             "  .adaptive-table .total-row td { border-top: 2px solid #e5e5e7; }",
+            "  .adaptive-table .row-good { background-color: #dcfce7; }",
+            "  .adaptive-table .row-warning { background-color: #fef3c7; }",
+            "  .adaptive-table .row-error { background-color: #fee2e2; }",
             "  .summary-table {",
             "    width: 100%;",
             "    border-collapse: separate;",
@@ -301,7 +354,6 @@ class EmailClient:
             "    padding-top: 20px;",
             "    padding-bottom: 20px;",
             "  }",
-            "  /* Вертикальная 'карточка' станции внутри одной ячейки */",
             "  .station-name {",
             "    font-weight: 600;",
             "    font-size: 15px;",
@@ -317,184 +369,365 @@ class EmailClient:
             "    border-bottom: 1px solid #f0f0f2;",
             "    font-size: 14px;",
             "  }",
-            "  .metrics-table td:last-child {",
+            "  .metrics-table tr:last-child td { border-bottom: none; }",
+            "  .metrics-label {",
+            "    color: #86868b;",
+            "    font-size: 11px;",
+            "    font-weight: 600;",
+            "    text-transform: uppercase;",
+            "    letter-spacing: 0.5px;",
+            "  }",
+            "  .metrics-value {",
             "    text-align: right;",
             "    font-variant-numeric: tabular-nums;",
             "  }",
-            "  .metrics-table tr:last-child td {",
-            "    border-bottom: none;",
+            "",
+            "  .desktop-table {",
+            "    width: 100%;",
+            "    border-collapse: separate;",
+            "    border-spacing: 0;",
+            "    background-color: #ffffff;",
+            "    border-radius: 12px;",
+            "    overflow: hidden;",
+            "    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);",
             "  }",
-            "  .section {",
-            "    margin: 16px 0 0 0;",
-            "  }",
-            "  .section-title {",
-            "    margin: 0 0 12px 2px;",
-            "    font-size: 16px;",
+            "  .desktop-table thead { background-color: #f5f5f7; }",
+            "  .desktop-table th {",
+            "    padding: 16px 20px;",
+            "    text-align: left;",
+            "    font-size: 13px;",
             "    font-weight: 600;",
+            "    color: #86868b;",
+            "    text-transform: uppercase;",
+            "    letter-spacing: 0.5px;",
+            "    border-bottom: 1px solid #e5e5e7;",
+            "    border-right: 1px solid #e5e5e7;",
+            "  }",
+            "  .desktop-table th:last-child { border-right: none; }",
+            "  .desktop-table th.number { text-align: right; }",
+            "  .desktop-table td {",
+            "    padding: 16px 20px;",
+            "    border-bottom: 1px solid #f5f5f7;",
+            "    border-right: 1px solid #e5e5e7;",
+            "    font-size: 15px;",
             "    color: #1d1d1f;",
             "  }",
-            "  .note {",
-            "    font-size: 13px;",
-            "    color: #6e6e73;",
-            "    margin: 8px 0 0 2px;",
-            "  }",
-            "  .graph {",
-            "    width: 100%;",
-            "    max-width: 780px;",
-            "    display: block;",
-            "    margin: 12px auto;",
+            "  .desktop-table td:last-child { border-right: none; }",
+            "  .desktop-table tr:last-child td { border-bottom: none; }",
+            "  .desktop-table tr:hover { background-color: #fafafa; }",
+            "  .desktop-table .number { text-align: right; font-variant-numeric: tabular-nums; }",
+            "  .desktop-table .total-row { background-color: #f5f5f7; font-weight: 600; }",
+            "  .desktop-table .total-row td { border-top: 2px solid #e5e5e7; }",
+            "  .desktop-table .row-good { background-color: #dcfce7; }",
+            "  .desktop-table .row-warning { background-color: #fef3c7; }",
+            "  .desktop-table .row-error { background-color: #fee2e2; }",
+            "  .graph-section {",
+            "    margin-top: 18px;",
+            "    padding: 8px 6px;",
+            "    background-color: #fafafa;",
             "    border-radius: 12px;",
-            "    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);",
+            "    page-break-inside: avoid;",
             "  }",
+            "  .graph-title {",
+            "    font-size: 17px;",
+            "    font-weight: 600;",
+            "    letter-spacing: -0.3px;",
+            "    color: #1d1d1f;",
+            "    margin-bottom: 14px;",
+            "  }",
+            "  .graph-image {",
+            "    max-width: 100%;",
+            "    height: auto;",
+            "    border-radius: 8px;",
+            "    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);",
+            "    display: block;",
+            "  }",
+            "  .empty-message {",
+            "    color: #86868b;",
+            "    font-style: italic;",
+            "    font-size: 13px;",
+            "    padding: 12px 0;",
+            "  }",
+            "  .unsuccessful-list {",
+            "    margin-top: 16px;",
+            "    padding: 14px;",
+            "    background-color: #fff5f5;",
+            "    border-radius: 8px;",
+            "    border-left: 3px solid #ff3b30;",
+            "  }",
+            "  .successful-list {",
+            "    margin-top: 16px;",
+            "    padding: 14px;",
+            "    background-color: #ecfdf5;",
+            "    border-radius: 8px;",
+            "    border-left: 3px solid #2e7d32;",
+            "  }",
+            "  .unsuccessful-list strong {",
+            "    color: #ff3b30;",
+            "    font-size: 15px;",
+            "    font-weight: 600;",
+            "    display: block;",
+            "    margin-bottom: 12px;",
+            "  }",
+            "  .successful-list strong {",
+            "    color: #2e7d32;",
+            "    font-size: 15px;",
+            "    font-weight: 600;",
+            "    display: block;",
+            "    margin-bottom: 12px;",
+            "  }",
+            "  .unsuccessful-list ul {",
+            "    margin: 0;",
+            "    padding-left: 20px;",
+            "    color: #1d1d1f;",
+            "    font-size: 14px;",
+            "  }",
+            "  .successful-list ul {",
+            "    margin: 0;",
+            "    padding-left: 20px;",
+            "    color: #1d1d1f;",
+            "    font-size: 14px;",
+            "  }",
+            "  .unsuccessful-list li {",
+            "    margin-bottom: 6px;",
+            "  }",
+            "  .chart-container {",
+            "    margin-top: 24px;",
+            "    padding: 8px 6px;",
+            "    background-color: #fafafa;",
+            "    border-radius: 12px;",
+            "  }",
+            "  body { padding: 10px 6px; }",
+            "  .container { border-radius: 10px; }",
+            "  .header { padding: 16px 14px 12px; }",
+            "  .content { padding: 10px; }",
+            "  .graph-section { padding: 8px 6px; }",
+            "  .chart-container { padding: 8px 6px; }",
             "</style>",
             "</head>",
             "<body>",
             "<div class='container'>",
             "  <div class='header'>",
-            "    <h2>Ежедневный отчет</h2>",
-            "    <p class='date'>" + date_display + "</p>",
+            f"    <h2>Сводка по станциям {date_display}</h2>",
             "  </div>",
-            "  <div class='content'>",
+            "  <div class='content'>"
         ]
 
-        inline_images: Dict[str, Path] = {}
+        # Коммерческие пролеты (как в old_GroundLinkServer) — первым блоком
+        if comm_stats is not None and comm_totals is not None:
+            html_lines.append("    <h2 style='margin-top: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Коммерческие пролеты</h2>")
+            html_lines.append("    <div class='table-wrap'>")
+            html_lines.append("      <table class='adaptive-table'>")
+            html_lines.append("        <thead>")
+            html_lines.append("          <tr>")
+            html_lines.append("            <th>Станция</th>")
+            html_lines.append("            <th class='number'>Всего</th>")
+            html_lines.append("            <th class='number'>Успешных</th>")
+            html_lines.append("            <th class='number'>Не принятых</th>")
+            html_lines.append("            <th class='number'>% не принятых</th>")
+            html_lines.append("          </tr>")
+            html_lines.append("        </thead>")
+            html_lines.append("        <tbody>")
 
-        html_lines.append("    <div class='section'>")
-        html_lines.append("      <div class='section-title'>Статистика по станциям</div>")
-        html_lines.append("      <div class='table-wrap'>")
-        html_lines.append("        <table class='adaptive-table'>")
-        html_lines.append("          <thead>")
-        html_lines.append("            <tr>")
-        html_lines.append("              <th>Станция</th>")
-        html_lines.append("              <th class='number'>Файлов</th>")
-        html_lines.append("              <th class='number'>Успешно</th>")
-        html_lines.append("              <th class='number'>Неуспешно</th>")
-        html_lines.append("              <th class='number'>%</th>")
-        html_lines.append("              <th class='number'>Средний SNR</th>")
-        html_lines.append("            </tr>")
-        html_lines.append("          </thead>")
-        html_lines.append("          <tbody>")
+            for station_name in sorted(comm_stats.keys()):
+                stats = comm_stats[station_name]
+                planned = int(stats.get("planned", 0))
+                successful = int(stats.get("successful", 0))
+                not_received = int(stats.get("not_received", 0))
+                percent = (not_received / planned * 100) if planned > 0 else 0.0
+                if planned == 0:
+                    row_class = "row-good"
+                elif percent <= 5:
+                    row_class = "row-good"
+                elif percent <= 25:
+                    row_class = "row-warning"
+                else:
+                    row_class = "row-error"
+                station_name_escaped = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                html_lines.append(f"        <tr class='{row_class}'>")
+                html_lines.append(f"          <td>{station_name_escaped}</td>")
+                html_lines.append(f"          <td class='number'>{planned}</td>")
+                html_lines.append(f"          <td class='number'>{successful}</td>")
+                html_lines.append(f"          <td class='number'>{not_received}</td>")
+                html_lines.append(f"          <td class='number'>{percent:.1f}%</td>")
+                html_lines.append("        </tr>")
 
-        total_files = 0
-        total_unsuccessful = 0
+            total_planned = int(comm_totals.get("planned", 0))
+            total_successful = int(comm_totals.get("successful", 0))
+            total_not_received = int(comm_totals.get("not_received", 0))
+            total_percent = (total_not_received / total_planned * 100) if total_planned > 0 else 0.0
+            html_lines.append("        <tr class='total-row'>")
+            html_lines.append("          <td>ИТОГО</td>")
+            html_lines.append(f"          <td class='number'>{total_planned}</td>")
+            html_lines.append(f"          <td class='number'>{total_successful}</td>")
+            html_lines.append(f"          <td class='number'>{total_not_received}</td>")
+            html_lines.append(f"          <td class='number'>{total_percent:.1f}%</td>")
+            html_lines.append("        </tr>")
+            html_lines.append("        </tbody>")
+            html_lines.append("      </table>")
+            html_lines.append("    </div>")
 
-        for station_name, stats in all_results.items():
-            total = stats.get("total_files", 0)
-            unsuccessful = stats.get("unsuccessful_passes", 0)
-            successful = total - unsuccessful
-            percent = (unsuccessful * 100.0 / total) if total > 0 else 0.0
-            avg_snr = stats.get("avg_snr", 0.0)
+            if comm_summary_7d_chart_path and Path(comm_summary_7d_chart_path).exists():
+                comm_cid = "comm_unsuccessful_7d"
+                inline_images[comm_cid] = Path(comm_summary_7d_chart_path)
+                html_lines.append("    <div class='chart-container'>")
+                html_lines.append(f"      <img src='cid:{comm_cid}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='Коммерческие пролеты: % не принятых за 7 дней' />")
+                html_lines.append("    </div>")
 
-            total_files += int(total)
-            total_unsuccessful += int(unsuccessful)
+            if comm_not_received_list:
+                html_lines.append("    <div class='graph-section' style='margin-top:12px;'>")
+                html_lines.append("      <div class='graph-title'>Не принятые коммерческие пролёты</div>")
+                html_lines.append("      <ul style='margin:8px 0; padding-left:20px;'>")
+                for item in comm_not_received_list:
+                    station_name = item[0]
+                    satellite_name = item[1]
+                    rx_start = item[2]
+                    rx_end = item[3]
+                    graph_url = (item[4] if len(item) > 4 else "").strip()
+                    station_esc = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    satellite_esc = satellite_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    label = f"{station_esc} — {satellite_esc}: {rx_start} – {rx_end}"
+                    if graph_url:
+                        url_esc = graph_url.replace("&", "&amp;").replace('"', "&quot;")
+                        html_lines.append(f"        <li><a href='{url_esc}'>{label}</a></li>")
+                    else:
+                        html_lines.append(f"        <li>{label}</li>")
+                html_lines.append("      </ul>")
+                html_lines.append("    </div>")
 
-            row_class = ""
-            if percent >= 50:
+            if comm_links:
+                success_links = comm_links.get("successful") or []
+                fail_links = comm_links.get("unsuccessful") or []
+                html_lines.append("    <div class='graph-section'>")
+                html_lines.append("      <div class='graph-title'>Графики коммерческих пролетов</div>")
+                if success_links:
+                    html_lines.append("      <div class='successful-list'>")
+                    html_lines.append("        <strong>Успешные коммерческие пролеты:</strong>")
+                    html_lines.append("        <ul>")
+                    for url in success_links:
+                        html_lines.append(f"          <li><a href='{url}'>{url}</a></li>")
+                    html_lines.append("        </ul>")
+                    html_lines.append("      </div>")
+                if fail_links:
+                    html_lines.append("      <div class='unsuccessful-list'>")
+                    html_lines.append("        <strong>Неуспешные:</strong>")
+                    html_lines.append("        <ul>")
+                    for url in fail_links:
+                        html_lines.append(f"          <li><a href='{url}'>{url}</a></li>")
+                    html_lines.append("        </ul>")
+                    html_lines.append("      </div>")
+                html_lines.append("    </div>")
+
+        # Общая статистика по станциям (как в old_GroundLinkServer)
+        html_lines.append("    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Общая статистика</h2>")
+        html_lines.append("    <div class='table-wrap'>")
+        html_lines.append("      <table class='adaptive-table'>")
+        html_lines.append("        <thead>")
+        html_lines.append("          <tr>")
+        html_lines.append("            <th>Станция</th>")
+        html_lines.append("            <th class='number'>Всего</th>")
+        html_lines.append("            <th class='number'>Успешных</th>")
+        html_lines.append("            <th class='number'>Пустых</th>")
+        html_lines.append("            <th class='number'>% пустых</th>")
+        html_lines.append("          </tr>")
+        html_lines.append("        </thead>")
+        html_lines.append("        <tbody>")
+
+        for station_name, stats in sorted_stations:
+            files = _files(stats)
+            successful = _successful(stats)
+            unsuccessful = _unsuccessful(stats)
+            unsuccessful_percent = (unsuccessful / files * 100) if files > 0 else 0.0
+            if files == 0:
                 row_class = "row-error"
-            elif percent >= 20:
+            elif unsuccessful_percent <= 5:
+                row_class = "row-good"
+            elif unsuccessful_percent <= 25:
                 row_class = "row-warning"
             else:
-                row_class = "row-good"
+                row_class = "row-error"
+            station_name_escaped = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            html_lines.append(f"        <tr class='{row_class}'>")
+            html_lines.append(f"          <td>{station_name_escaped}</td>")
+            html_lines.append(f"          <td class='number'>{files}</td>")
+            html_lines.append(f"          <td class='number'>{successful}</td>")
+            html_lines.append(f"          <td class='number'>{unsuccessful}</td>")
+            html_lines.append(f"          <td class='number'>{unsuccessful_percent:.1f}%</td>")
+            html_lines.append("        </tr>")
 
-            html_lines.append(f"            <tr class='{row_class}'>")
-            html_lines.append(f"              <td>{station_name}</td>")
-            html_lines.append(f"              <td class='number'>{total}</td>")
-            html_lines.append(f"              <td class='number'>{successful}</td>")
-            html_lines.append(f"              <td class='number'>{unsuccessful}</td>")
-            html_lines.append(f"              <td class='number'>{percent:.1f}%</td>")
-            html_lines.append(f"              <td class='number'>{avg_snr:.2f}</td>")
-            html_lines.append("            </tr>")
+        total_all_files = sum(_files(s) for s in all_results.values())
+        total_successful = sum(_successful(s) for s in all_results.values())
+        total_unsuccessful = sum(_unsuccessful(s) for s in all_results.values())
+        total_unsuccessful_percent = (total_unsuccessful / total_all_files * 100) if total_all_files > 0 else 0.0
 
-        total_successful = total_files - total_unsuccessful
-        total_percent = (total_unsuccessful * 100.0 / total_files) if total_files > 0 else 0.0
-        html_lines.append("            <tr class='total-row'>")
-        html_lines.append("              <td>Итого</td>")
-        html_lines.append(f"              <td class='number'>{total_files}</td>")
-        html_lines.append(f"              <td class='number'>{total_successful}</td>")
-        html_lines.append(f"              <td class='number'>{total_unsuccessful}</td>")
-        html_lines.append(f"              <td class='number'>{total_percent:.1f}%</td>")
-        html_lines.append("              <td class='number'>—</td>")
-        html_lines.append("            </tr>")
-
-        html_lines.append("          </tbody>")
-        html_lines.append("        </table>")
-        html_lines.append("      </div>")
+        html_lines.append("        <tr class='total-row'>")
+        html_lines.append("          <td>ИТОГО</td>")
+        html_lines.append(f"          <td class='number'>{total_all_files}</td>")
+        html_lines.append(f"          <td class='number'>{total_successful}</td>")
+        html_lines.append(f"          <td class='number'>{total_unsuccessful}</td>")
+        html_lines.append(f"          <td class='number'>{total_unsuccessful_percent:.1f}%</td>")
+        html_lines.append("        </tr>")
+        html_lines.append("        </tbody>")
+        html_lines.append("      </table>")
         html_lines.append("    </div>")
 
-        if summary_7d_chart_path:
-            cid = "summary_7d_chart"
-            inline_images[cid] = Path(summary_7d_chart_path)
-            html_lines.append("    <div class='section'>")
-            html_lines.append("      <div class='section-title'>Динамика пустых пролетов (7 дней)</div>")
-            html_lines.append(f"      <img class='graph' src='cid:{cid}' alt='summary_7d_chart'>")
+        if summary_7d_chart_path and Path(summary_7d_chart_path).exists():
+            summary_cid = "summary_unsuccessful_7d"
+            inline_images[summary_cid] = Path(summary_7d_chart_path)
+            html_lines.append("    <div class='chart-container'>")
+            html_lines.append(f"      <img src='cid:{summary_cid}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='Сводный график за 7 дней' />")
             html_lines.append("    </div>")
+        else:
+            html_lines.append("    <p class='empty-message'>Нет данных для построения графика.</p>")
 
-        if comm_stats and comm_totals:
-            html_lines.append("    <div class='section'>")
-            html_lines.append("      <div class='section-title'>Коммерческие пролеты</div>")
-            html_lines.append("      <div class='table-wrap'>")
-            html_lines.append("        <table class='summary-table'>")
-            html_lines.append("          <thead>")
-            html_lines.append("            <tr>")
-            html_lines.append("              <th>Станция</th>")
-            html_lines.append("              <th class='number'>X</th>")
-            html_lines.append("              <th class='number'>L</th>")
-            html_lines.append("              <th class='number'>Итого</th>")
-            html_lines.append("            </tr>")
-            html_lines.append("          </thead>")
-            html_lines.append("          <tbody>")
-
-            total_comm = 0
-            total_comm_x = 0
-            total_comm_l = 0
-
-            for station_name, s in comm_stats.items():
-                x_count = int(s.get("X", 0))
-                l_count = int(s.get("L", 0))
-                total_count = int(comm_totals.get(station_name, 0))
-                total_comm += total_count
-                total_comm_x += x_count
-                total_comm_l += l_count
-
-                html_lines.append("            <tr>")
-                html_lines.append(f"              <td>{station_name}</td>")
-                html_lines.append(f"              <td class='number'>{x_count}</td>")
-                html_lines.append(f"              <td class='number'>{l_count}</td>")
-                html_lines.append(f"              <td class='number'>{total_count}</td>")
-                html_lines.append("            </tr>")
-
-            html_lines.append("            <tr class='total-row'>")
-            html_lines.append("              <td>Итого</td>")
-            html_lines.append(f"              <td class='number'>{total_comm_x}</td>")
-            html_lines.append(f"              <td class='number'>{total_comm_l}</td>")
-            html_lines.append(f"              <td class='number'>{total_comm}</td>")
-            html_lines.append("            </tr>")
-
-            html_lines.append("          </tbody>")
-            html_lines.append("        </table>")
-            html_lines.append("      </div>")
-            html_lines.append("    </div>")
-
-        if comm_summary_7d_chart_path:
-            cid = "comm_summary_7d_chart"
-            inline_images[cid] = Path(comm_summary_7d_chart_path)
-            html_lines.append("    <div class='section'>")
-            html_lines.append("      <div class='section-title'>Коммерческие пролеты (7 дней)</div>")
-            html_lines.append(f"      <img class='graph' src='cid:{cid}' alt='comm_summary_7d_chart'>")
-            html_lines.append("    </div>")
-
-        if comm_links:
-            html_lines.append("    <div class='section'>")
-            html_lines.append("      <div class='section-title'>Ссылки на коммерческие логи</div>")
-            for station_name, links in comm_links.items():
-                html_lines.append("      <div style='margin-bottom: 12px;'>")
-                html_lines.append(f"        <div class='station-name'>{station_name}</div>")
+        # Графики пролетов по станциям (как в old_GroundLinkServer): по 1 лучшему пролету с графиком + список пустых
+        graphs_dir_p = Path(graphs_dir) if graphs_dir else None
+        html_lines.append("    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Графики пролетов</h2>")
+        for station_name, stats in sorted_stations:
+            station_name_escaped = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            html_lines.append("    <div class='graph-section'>")
+            html_lines.append(f"      <div class='graph-title'>{station_name_escaped}</div>")
+            max_snr_filename = stats.get("max_snr_filename", "")
+            best_graph_path = stats.get("best_graph_path")
+            graph_path = None
+            if best_graph_path and Path(best_graph_path).exists():
+                graph_path = Path(best_graph_path)
+            elif max_snr_filename and graphs_dir_p and graphs_dir_p.exists():
+                graph_name = max_snr_filename.replace(".log", ".png").replace(" ", "_")
+                graph_path = graphs_dir_p / station_name / graph_name
+                if not graph_path.exists():
+                    graph_path = graphs_dir_p / graph_name
+                if not graph_path.exists():
+                    graph_path = None
+            if graph_path and graph_path.exists():
+                graph_name = graph_path.name
+                cid = f"graph_{station_name}_{graph_name}".replace(" ", "_").replace(".", "_")
+                inline_images[cid] = graph_path
+                html_lines.append(f"      <img src='cid:{cid}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='График для {station_name_escaped}' />")
+            elif max_snr_filename:
+                html_lines.append("      <p class='empty-message'>График лучшего пролета не найден</p>")
+            else:
+                html_lines.append("      <p class='empty-message'>Нет данных по лучшему пролету</p>")
+            # График % пустых за 7 дней по станции
+            station_7d_path = stats.get("station_7d_chart_path")
+            if station_7d_path and Path(station_7d_path).exists():
+                station_7d_p = Path(station_7d_path)
+                cid_7d = f"station_7d_{station_name}".replace(" ", "_").replace(".", "_")
+                inline_images[cid_7d] = station_7d_p
+                html_lines.append("      <p style='margin-top:12px;font-size:13px;color:#86868b;'>Пустые пролеты за 7 дней</p>")
+                html_lines.append(f"      <img src='cid:{cid_7d}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='% пустых за 7 дней — {station_name_escaped}' />")
+            unsuccessful_filenames = stats.get("unsuccessful_filenames", [])
+            if unsuccessful_filenames:
+                html_lines.append("      <div class='unsuccessful-list'>")
+                html_lines.append(f"        <strong>Пустые пролеты ({len(unsuccessful_filenames)})</strong>")
                 html_lines.append("        <ul>")
-                for log_url in links:
-                    log_url_escaped = log_url.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    html_lines.append(
-                        f"          <li><a href='{log_url_escaped}' target='_blank' rel='noopener noreferrer'>{log_url_escaped}</a></li>"
-                    )
+                for item in unsuccessful_filenames:
+                    s = str(item).strip()
+                    if s.startswith("http://") or s.startswith("https://"):
+                        link_url = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    else:
+                        link_url = f"https://eus.lorett.org/eus/log_view/{quote(s)}".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    html_lines.append(f"          <li><a href='{link_url}' target='_blank' rel='noopener noreferrer'>{link_url}</a></li>")
                 html_lines.append("        </ul>")
                 html_lines.append("      </div>")
             html_lines.append("    </div>")
@@ -505,7 +738,6 @@ class EmailClient:
             "</body>",
             "</html>",
         ])
-
         return "\n".join(html_lines), inline_images
 
     def send_stats_email(
@@ -576,5 +808,5 @@ class EmailClient:
             server.quit()
             return True
         except Exception as e:
-            self.logger.warning(f"Email: ошибка отправки: {e}", exc_info=True)
+            self.logger.exception(f"Email: ошибка отправки: {e}")
             return False

@@ -1,0 +1,17 @@
+2026-01-30 20:26:22,532 : INFO : MAIN : Start logging
+2026-01-30 20:26:22,804 : INFO : MAIN : logs download time: station=PlanumMoscow time=0.01s
+2026-01-30 20:26:22,813 : INFO : MAIN : logs download time: station=R2M6_AANII_01 time=0.01s
+2026-01-30 20:26:22,829 : INFO : MAIN : logs download time: station=R4.6S_Anadyr_2ch time=0.01s
+2026-01-30 20:26:22,832 : INFO : MAIN : logs download time: station=Regia time=0.00s
+2026-01-30 20:26:22,835 : INFO : MAIN : logs download time: station=XPeterburg time=0.00s
+2026-01-30 20:26:22,837 : INFO : MAIN : logs download time: station=X_Chapaevo_01 time=0.00s
+2026-01-30 20:26:22,840 : INFO : MAIN : logs download time: station=Xkaliningrad time=0.00s
+2026-01-30 20:26:22,847 : INFO : MAIN : logs download time: station=planumMaritime01 time=0.01s
+2026-01-30 20:26:22,854 : INFO : MAIN : logs download time: station=R2.0S_Moscow time=0.01s
+2026-01-30 20:26:22,860 : INFO : MAIN : logs download time: station=R3.2S-Naryan-Mar time=0.01s
+2026-01-30 20:26:22,867 : INFO : MAIN : logs download time: station=R3.2S_Murmansk time=0.01s
+2026-01-30 20:26:22,872 : INFO : MAIN : logs download time: station=R4.6S_Anadyr time=0.00s
+2026-01-30 20:26:22,885 : INFO : MAIN : logs download time: station=T1 time=0.01s
+2026-01-30 20:26:23,648 : INFO : MAIN : batch insert complete: inserted=0
+2026-01-30 20:26:24,423 : WARNING : MAIN : download best-pass graphs failed: 'str' object has no attribute 'strftime'
+2026-01-30 20:26:26,948 : INFO : MAIN : email sent for 20260130

@@ -1,0 +1,15 @@
+2026-01-30 20:04:30,238 : INFO : MAIN : Start logging
+2026-01-30 20:04:31,072 : INFO : MAIN : logs download time: station=PlanumMoscow time=0.01s
+2026-01-30 20:04:31,081 : INFO : MAIN : logs download time: station=R2M6_AANII_01 time=0.01s
+2026-01-30 20:04:31,106 : INFO : MAIN : logs download time: station=R4.6S_Anadyr_2ch time=0.02s
+2026-01-30 20:04:31,114 : INFO : MAIN : logs download time: station=Regia time=0.00s
+2026-01-30 20:04:31,119 : INFO : MAIN : logs download time: station=XPeterburg time=0.00s
+2026-01-30 20:04:31,124 : INFO : MAIN : logs download time: station=X_Chapaevo_01 time=0.00s
+2026-01-30 20:04:31,129 : INFO : MAIN : logs download time: station=Xkaliningrad time=0.00s
+2026-01-30 20:04:31,139 : INFO : MAIN : logs download time: station=planumMaritime01 time=0.01s
+2026-01-30 20:04:31,147 : INFO : MAIN : logs download time: station=R2.0S_Moscow time=0.01s
+2026-01-30 20:04:31,159 : INFO : MAIN : logs download time: station=R3.2S-Naryan-Mar time=0.01s
+2026-01-30 20:04:31,168 : INFO : MAIN : logs download time: station=R3.2S_Murmansk time=0.01s
+2026-01-30 20:04:31,176 : INFO : MAIN : logs download time: station=R4.6S_Anadyr time=0.01s
+2026-01-30 20:04:31,182 : INFO : MAIN : logs download time: station=T1 time=0.01s
+2026-01-30 20:04:31,936 : INFO : MAIN : batch insert complete: inserted=0

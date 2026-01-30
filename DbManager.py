@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 from SatPass import SatPas
 from Logger import Logger
 
@@ -26,6 +26,11 @@ class DbManager:
         - add_pass: добавляет пролет и обновляет дневную статистику.
         - _bump_stats: обновляет дневную статистику станции.
         - add_commercial_pass: добавляет коммерческий пролет.
+        - replace_commercial_passes: заменяет все коммерческие пролёты списком из Telegram.
+        - get_commercial_passes_planned_count: число коммерческих пролётов за день (опционально до момента UTC).
+        - get_commercial_passes_stats_by_station: статистика по станциям (planned/successful/not_received) для письма.
+        - get_commercial_passes_received_count: число коммерческих пролётов за день с успешным приёмом.
+        - get_commercial_passes_not_received_list: список коммерческих пролётов без приёма (для письма).
         - list_passes: возвращает список пролетов с фильтром по станции.
         - get_daily_success_stats: статистика успешности за день.
         - get_daily_station_stats: статистика по станциям за день.
@@ -162,6 +167,26 @@ class DbManager:
             return value.isoformat()
         # если значение является строкой, то возвращает строку
         return str(value)
+
+    # Преобразует значение из БД (строка/date/datetime) в date.
+    def _parse_date(self, value: date | datetime | str | None) -> date | None:
+        """Преобразует дату из БД в объект date (для SatPas.pass_date)."""
+        if value is None:
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        s = str(value).strip()
+        if not s:
+            return None
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        except ValueError:
+            try:
+                return datetime.strptime(s[:8], "%Y%m%d").date()
+            except ValueError:
+                return None
 
     # Округляет вещественные числа до 2 знаков.
     def _round2(self, value: Optional[float]) -> Optional[float]:
@@ -532,6 +557,45 @@ class DbManager:
             conn.rollback()
             raise
 
+    # Заменяет все коммерческие пролёты списком из Telegram.
+    def replace_commercial_passes(
+        self,
+        passes: List[Tuple[str, str, str, str]],
+        pass_type: str = "коммерческий",
+    ) -> int:
+        """Заменяет все записи в commercial_passes на переданный список.
+
+        Каждый элемент passes — (station_name, satellite_name, rx_start_time, rx_end_time).
+
+        Returns:
+            int: Количество записанных пролётов.
+        """
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM commercial_passes")
+            count = 0
+            for station_name, satellite_name, rx_start, rx_end in passes:
+                conn.execute(
+                    """
+                    INSERT INTO commercial_passes (
+                        station_name, satellite_name, rx_start_time, rx_end_time, pass_type
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        station_name,
+                        satellite_name,
+                        self._normalize_time(rx_start),
+                        self._normalize_time(rx_end),
+                        pass_type,
+                    ),
+                )
+                count += 1
+            conn.commit()
+            return count
+        except Exception:
+            conn.rollback()
+            raise
+
     # Возвращает список пролетов (опционально по станции).
     def list_passes(self, station_name: Optional[str] = None) -> Iterable[sqlite3.Row]:
         """Возвращает список пролетов (опционально по станции).
@@ -556,6 +620,225 @@ class DbManager:
             ).fetchall()
         finally:
             conn.row_factory = prev_factory
+
+    # Количество коммерческих пролётов, заказанных на день (опционально — только до указанного момента по UTC).
+    def get_commercial_passes_planned_count(
+        self,
+        stat_day: date | datetime | str,
+        up_to_datetime: Optional[datetime] = None,
+    ) -> int:
+        """Возвращает число коммерческих пролётов за день.
+
+        Если задан up_to_datetime (UTC), считаются только пролёты с rx_start_time <= этого момента
+        (уже «должны были начаться» к текущему времени).
+        """
+        day_value = self._normalize_date(stat_day)
+        conn = self._connect()
+        if up_to_datetime is not None:
+            up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) = ? AND rx_start_time <= ?
+                """,
+                (day_value, up_to_str),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) = ?
+                """,
+                (day_value,),
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    # Статистика коммерческих пролётов по станциям за день (для письма, как в old_GroundLinkServer).
+    def get_commercial_passes_stats_by_station(
+        self,
+        stat_day: date | datetime | str,
+        up_to_datetime: Optional[datetime] = None,
+    ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+        """Возвращает (stats, totals) для блока «Коммерческие пролеты» в письме.
+
+        stats = {station_name: {"planned": N, "successful": N, "not_received": N}}
+        totals = {"planned": P, "successful": S, "not_received": R}
+        Если задан up_to_datetime (UTC), учитываются только пролёты с rx_start_time <= этого момента.
+        """
+        day_value = self._normalize_date(stat_day)
+        conn = self._connect()
+        up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S") if up_to_datetime else None
+
+        # Запланировано по станциям
+        if up_to_str:
+            planned_rows = conn.execute(
+                """
+                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) = ? AND rx_start_time <= ?
+                GROUP BY station_name
+                """,
+                (day_value, up_to_str),
+            ).fetchall()
+        else:
+            planned_rows = conn.execute(
+                """
+                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) = ?
+                GROUP BY station_name
+                """,
+                (day_value,),
+            ).fetchall()
+
+        stats: Dict[str, Dict[str, int]] = {}
+        totals = {"planned": 0, "successful": 0, "not_received": 0}
+
+        for station_name, planned in planned_rows:
+            planned = int(planned)
+            stats[station_name] = {"planned": planned, "successful": 0, "not_received": planned}
+            totals["planned"] += planned
+            totals["not_received"] += planned
+
+        # Принято по станциям (успешные в all_passes)
+        if up_to_str:
+            received_rows = conn.execute(
+                """
+                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ?
+                GROUP BY cp.station_name
+                """,
+                (day_value, up_to_str),
+            ).fetchall()
+        else:
+            received_rows = conn.execute(
+                """
+                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) = ?
+                GROUP BY cp.station_name
+                """,
+                (day_value,),
+            ).fetchall()
+
+        for station_name, received in received_rows:
+            received = int(received)
+            if station_name in stats:
+                stats[station_name]["successful"] = received
+                stats[station_name]["not_received"] = stats[station_name]["planned"] - received
+            totals["successful"] += received
+        totals["not_received"] = totals["planned"] - totals["successful"]
+
+        return stats, totals
+
+    # Количество коммерческих пролётов, принятых за день (есть успешная запись в all_passes).
+    def get_commercial_passes_received_count(
+        self,
+        stat_day: date | datetime | str,
+        up_to_datetime: Optional[datetime] = None,
+    ) -> int:
+        """Возвращает число коммерческих пролётов за день, по которым есть успешный приём в all_passes.
+
+        Сопоставление: станция + спутник + дата. Если задан up_to_datetime (UTC), считаются только
+        пролёты с rx_start_time <= этого момента — тогда принято не может превысить заказано.
+        """
+        day_value = self._normalize_date(stat_day)
+        conn = self._connect()
+        if up_to_datetime is not None:
+            up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ?
+                """,
+                (day_value, up_to_str),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) = ?
+                """,
+                (day_value,),
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    # Список коммерческих пролётов за день без приёма, с ссылкой на график (если есть неуспешная запись в all_passes).
+    def get_commercial_passes_not_received_list(
+        self,
+        stat_day: date | datetime | str,
+        up_to_datetime: Optional[datetime] = None,
+    ) -> List[Tuple[str, str, str, str, str]]:
+        """Возвращает список (station_name, satellite_name, rx_start_time, rx_end_time, graph_url) для пролётов без приёма.
+        graph_url — ссылка на график из all_passes (success=0), если есть; иначе пустая строка.
+        """
+        day_value = self._normalize_date(stat_day)
+        conn = self._connect()
+        subq = """
+            (SELECT ap.graph_url FROM all_passes ap
+             WHERE ap.station_name = cp.station_name
+               AND ap.satellite_name = cp.satellite_name
+               AND ap.pass_date = date(cp.rx_start_time)
+               AND ap.success = 0
+               AND ap.graph_url IS NOT NULL AND ap.graph_url != ''
+             LIMIT 1)
+        """
+        if up_to_datetime is not None:
+            up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            rows = conn.execute(
+                f"""
+                SELECT cp.station_name, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                FROM commercial_passes cp
+                LEFT JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND ap.id IS NULL
+                ORDER BY cp.station_name, cp.rx_start_time
+                """,
+                (day_value, up_to_str),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"""
+                SELECT cp.station_name, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                FROM commercial_passes cp
+                LEFT JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) = ? AND ap.id IS NULL
+                ORDER BY cp.station_name, cp.rx_start_time
+                """,
+                (day_value,),
+            ).fetchall()
+        return [
+            (str(r[0]), str(r[1]), str(r[2] or ""), str(r[3] or ""), str(r[4] or "").strip())
+            for r in rows
+        ]
 
     # Возвращает статистику успешных пролетов за указанный день.
     def get_daily_success_stats(self, stat_day: date | datetime | str) -> list[list]:
@@ -647,7 +930,7 @@ class DbManager:
             sat_pass = SatPas(
                 station_name=row["station_name"],
                 satellite_name=row["satellite_name"],
-                pass_date=row["pass_date"],
+                pass_date=self._parse_date(row["pass_date"]),
                 pass_start_time=row["pass_start_time"],
                 pass_end_time=row["pass_end_time"],
                 rx_start_time=row["rx_start_time"],

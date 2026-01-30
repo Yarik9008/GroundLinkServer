@@ -1,0 +1,20 @@
+2026-01-30 22:20:43,865 : INFO : EUS : Start logging
+2026-01-30 22:20:43,866 : INFO : EUS : EusLogPortal initialized
+2026-01-30 22:20:46,458 : INFO : EUS : load_html_and_parse: start=2026-01-22T00:00:00+00:00 end=2026-01-31T00:00:00+00:00 months=1
+2026-01-30 22:20:46,696 : INFO : EUS : html loaded: url=http://eus.lorett.org/eus/logs_list.html range=2026-01-22..2026-01-30 bytes=368920 time=0.24s
+2026-01-30 22:20:47,004 : INFO : EUS : html loaded: url=http://eus.lorett.org/eus/logs.html range=2026-01-22..2026-01-30 bytes=463179 time=0.27s
+2026-01-30 22:20:47,143 : INFO : EUS : log download stats: ok=1 skipped=156 failed=0
+2026-01-30 22:20:47,183 : INFO : EUS : log download stats: ok=0 skipped=298 failed=0
+2026-01-30 22:20:47,231 : INFO : EUS : log download stats: ok=1 skipped=60 failed=0
+2026-01-30 22:20:47,235 : INFO : EUS : log download stats: ok=0 skipped=17 failed=0
+2026-01-30 22:20:47,336 : INFO : EUS : log download stats: ok=0 skipped=761 failed=0
+2026-01-30 22:20:47,345 : INFO : EUS : log download stats: ok=0 skipped=61 failed=0
+2026-01-30 22:20:47,351 : INFO : EUS : log download stats: ok=0 skipped=29 failed=0
+2026-01-30 22:20:47,357 : INFO : EUS : log download stats: ok=0 skipped=33 failed=0
+2026-01-30 22:20:47,363 : INFO : EUS : log download stats: ok=0 skipped=33 failed=0
+2026-01-30 22:20:47,441 : INFO : EUS : log download stats: ok=1 skipped=161 failed=0
+2026-01-30 22:20:47,476 : INFO : EUS : log download stats: ok=0 skipped=263 failed=0
+2026-01-30 22:20:47,493 : INFO : EUS : log download stats: ok=0 skipped=108 failed=0
+2026-01-30 22:20:47,546 : INFO : EUS : log download stats: ok=0 skipped=380 failed=0
+2026-01-30 22:20:47,588 : INFO : EUS : log download stats: ok=0 skipped=325 failed=0
+2026-01-30 22:20:47,627 : INFO : EUS : log download stats: ok=0 skipped=291 failed=0

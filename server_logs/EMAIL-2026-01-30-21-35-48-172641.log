@@ -1,0 +1,2 @@
+2026-01-30 21:35:48,173 : INFO : EMAIL : Start logging
+2026-01-30 21:36:42,663 : ERROR : EMAIL : Email: ошибка отправки: _ssl.c:1011: The handshake operation timed out

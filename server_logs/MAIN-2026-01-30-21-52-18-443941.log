@@ -1,0 +1,21 @@
+2026-01-30 21:52:18,444 : INFO : MAIN : Start logging
+2026-01-30 21:52:18,458 : INFO : MAIN : Синхронизация Telegram канала: https://t.me/+Lb1SuoOUlodhYTli
+2026-01-30 21:52:20,971 : INFO : MAIN : Синхронизация завершена: сообщений=5, пролётов=186
+2026-01-30 21:52:20,972 : INFO : MAIN : Telegram: синхронизация пролётов: сообщений=5, пролётов=186
+2026-01-30 21:52:20,976 : INFO : MAIN : БД: записано коммерческих пролётов: 186
+2026-01-30 21:52:22,197 : INFO : MAIN : logs download time: station=PlanumMoscow time=0.00s
+2026-01-30 21:52:22,202 : INFO : MAIN : logs download time: station=R2M6_AANII_01 time=0.00s
+2026-01-30 21:52:22,212 : INFO : MAIN : logs download time: station=R4.6S_Anadyr_2ch time=0.01s
+2026-01-30 21:52:22,215 : INFO : MAIN : logs download time: station=Regia time=0.00s
+2026-01-30 21:52:22,216 : INFO : MAIN : logs download time: station=XPeterburg time=0.00s
+2026-01-30 21:52:22,218 : INFO : MAIN : logs download time: station=X_Chapaevo_01 time=0.00s
+2026-01-30 21:52:22,220 : INFO : MAIN : logs download time: station=Xkaliningrad time=0.00s
+2026-01-30 21:52:22,224 : INFO : MAIN : logs download time: station=planumMaritime01 time=0.00s
+2026-01-30 21:52:22,229 : INFO : MAIN : logs download time: station=R2.0S_Moscow time=0.00s
+2026-01-30 21:52:22,234 : INFO : MAIN : logs download time: station=R3.2S-Naryan-Mar time=0.01s
+2026-01-30 21:52:22,241 : INFO : MAIN : logs download time: station=R3.2S_Murmansk time=0.01s
+2026-01-30 21:52:22,246 : INFO : MAIN : logs download time: station=R4.6S_Anadyr time=0.00s
+2026-01-30 21:52:22,251 : INFO : MAIN : logs download time: station=T1 time=0.00s
+2026-01-30 21:52:22,801 : INFO : MAIN : batch insert complete: inserted=0
+2026-01-30 21:52:24,401 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 3, принято: 2
+2026-01-30 21:52:26,885 : INFO : MAIN : email sent for 20260130

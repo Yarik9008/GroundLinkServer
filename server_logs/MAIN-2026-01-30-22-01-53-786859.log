@@ -1,0 +1,45 @@
+2026-01-30 22:01:53,787 : INFO : MAIN : Start logging
+2026-01-30 22:01:53,828 : INFO : MAIN : Синхронизация Telegram канала: https://t.me/+Lb1SuoOUlodhYTli
+2026-01-30 22:01:56,515 : INFO : MAIN : Синхронизация завершена: сообщений=5, пролётов=186
+2026-01-30 22:01:56,516 : INFO : MAIN : Telegram: синхронизация пролётов: сообщений=5, пролётов=186
+2026-01-30 22:01:56,519 : INFO : MAIN : БД: записано коммерческих пролётов: 186
+2026-01-30 22:01:57,325 : INFO : MAIN : logs download time: station=PlanumMoscow time=0.03s
+2026-01-30 22:01:57,327 : INFO : MAIN : logs download time: station=R2.0S-dem200 time=0.00s
+2026-01-30 22:01:57,376 : INFO : MAIN : logs download time: station=R2M6_AANII_01 time=0.05s
+2026-01-30 22:01:57,446 : INFO : MAIN : logs download time: station=R3.0SM8_Murmansk_STILSPACE time=0.07s
+2026-01-30 22:01:57,451 : INFO : MAIN : logs download time: station=R3.2S_Murmansk_2ch time=0.00s
+2026-01-30 22:01:57,567 : INFO : MAIN : logs download time: station=R4.6S_Anadyr_2ch time=0.12s
+2026-01-30 22:01:57,577 : INFO : MAIN : logs download time: station=Regia time=0.01s
+2026-01-30 22:01:57,585 : INFO : MAIN : logs download time: station=XPeterburg time=0.01s
+2026-01-30 22:01:57,592 : INFO : MAIN : logs download time: station=X_Chapaevo_01 time=0.01s
+2026-01-30 22:01:57,601 : INFO : MAIN : logs download time: station=Xkaliningrad time=0.01s
+2026-01-30 22:01:57,630 : INFO : MAIN : logs download time: station=planumMaritime01 time=0.03s
+2026-01-30 22:01:57,674 : INFO : MAIN : logs download time: station=R2.0S_Moscow time=0.04s
+2026-01-30 22:01:57,677 : INFO : MAIN : logs download time: station=R2.0S_Raduga time=0.00s
+2026-01-30 22:01:57,694 : INFO : MAIN : logs download time: station=R3.2S-Naryan-Mar time=0.02s
+2026-01-30 22:01:57,759 : INFO : MAIN : logs download time: station=R3.2S_Murmansk time=0.06s
+2026-01-30 22:01:57,819 : INFO : MAIN : logs download time: station=R4.6S_Anadyr time=0.06s
+2026-01-30 22:01:57,867 : INFO : MAIN : logs download time: station=T1 time=0.05s
+2026-01-30 22:02:16,002 : INFO : MAIN : batch insert complete: inserted=5
+2026-01-30 22:02:28,722 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 8, принято: 6
+2026-01-30 22:02:31,831 : INFO : MAIN : email sent for 20260120
+2026-01-30 22:02:39,524 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 8, принято: 8
+2026-01-30 22:02:42,526 : INFO : MAIN : email sent for 20260121
+2026-01-30 22:02:50,494 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 12, принято: 11
+2026-01-30 22:02:53,301 : INFO : MAIN : email sent for 20260122
+2026-01-30 22:03:01,538 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 8, принято: 7
+2026-01-30 22:03:04,155 : INFO : MAIN : email sent for 20260123
+2026-01-30 22:03:11,709 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 8, принято: 6
+2026-01-30 22:03:14,011 : INFO : MAIN : email sent for 20260124
+2026-01-30 22:03:21,817 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 8, принято: 7
+2026-01-30 22:03:24,164 : INFO : MAIN : email sent for 20260125
+2026-01-30 22:03:32,004 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 7, принято: 7
+2026-01-30 22:03:35,271 : INFO : MAIN : email sent for 20260126
+2026-01-30 22:03:43,078 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 9, принято: 9
+2026-01-30 22:03:45,319 : INFO : MAIN : email sent for 20260127
+2026-01-30 22:03:53,339 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 10, принято: 8
+2026-01-30 22:03:56,312 : INFO : MAIN : email sent for 20260128
+2026-01-30 22:04:04,300 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 10, принято: 9
+2026-01-30 22:04:06,530 : INFO : MAIN : email sent for 20260129
+2026-01-30 22:04:07,743 : INFO : MAIN : Коммерческих пролётов заказано (на текущий момент UTC): 3, принято: 2
+2026-01-30 22:04:09,967 : INFO : MAIN : email sent for 20260130

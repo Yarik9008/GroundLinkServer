@@ -81,9 +81,11 @@ class EusLogDownloader:
         # параметры даты
         self.params: Tuple[datetime, datetime] = (start_dt, end_dt)
 
-        # ширина и высота графика
+        #
         self.graph_viewport_width = 620
-        self.graph_viewport_height = 680
+
+        #
+        self.graph_viewport_height = 660
         self.graph_load_delay = 0.5
         self.graph_scroll_x = 0 
         self.graph_scroll_y = 0 
