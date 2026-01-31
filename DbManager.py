@@ -511,6 +511,54 @@ class DbManager:
             ),
         )
 
+    def update_pass_graph_artifacts(self, sat_pass: SatPas) -> int:
+        """Обновляет graph_path (и при наличии graph_url) для пролёта в all_passes.
+
+        Используется после фактического сохранения PNG графика приёма на диск.
+        Поиск записи идёт по приоритету: pass_id → log_url → log_path.
+
+        Args:
+            sat_pass: Объект SatPas с заполненными graph_path и идентификаторами (pass_id/log_url/log_path).
+
+        Returns:
+            int: Количество обновлённых строк (0 или 1).
+        """
+        if sat_pass is None or not getattr(sat_pass, "graph_path", None):
+            return 0
+
+        graph_path = str(getattr(sat_pass, "graph_path"))
+        graph_url = getattr(sat_pass, "graph_url", None)
+
+        conn = self._connect()
+
+        def _update(where_sql: str, where_params: tuple) -> int:
+            cur = conn.execute(
+                f"""
+                UPDATE all_passes
+                SET graph_path = ?,
+                    graph_url = COALESCE(?, graph_url)
+                {where_sql}
+                """,
+                (graph_path, graph_url, *where_params),
+            )
+            return int(cur.rowcount or 0)
+
+        updated = 0
+        pass_id = getattr(sat_pass, "pass_id", None)
+        log_url = getattr(sat_pass, "log_url", None)
+        log_path = getattr(sat_pass, "log_path", None)
+
+        if pass_id:
+            updated = _update("WHERE pass_id = ?", (str(pass_id),))
+        if updated == 0 and log_url:
+            updated = _update("WHERE log_url = ?", (str(log_url),))
+        if updated == 0 and log_path:
+            updated = _update("WHERE log_path = ?", (str(log_path),))
+
+        if updated:
+            conn.commit()
+        return updated
+
     # Добавляет заказанный коммерческий пролет.
     def add_commercial_pass(
         self,

@@ -640,6 +640,12 @@ class GroundLinkServer:
                         for p in max_passes_for_email:
                             if getattr(p, "graph_path", None) and p.station_name in all_results:
                                 all_results[p.station_name]["best_graph_path"] = p.graph_path
+                            # Сохраняем путь к скачанному графику приёма в БД (all_passes.graph_path)
+                            if getattr(p, "graph_path", None):
+                                try:
+                                    self.db_manager.update_pass_graph_artifacts(p)
+                                except Exception as exc:
+                                    self.logger.warning(f"DB: update graph_path failed: {exc}")
                     except Exception as e:
                         self.logger.warning(f"download best-pass graphs failed: {e}")
                 now_utc = datetime.now(timezone.utc)
@@ -819,11 +825,19 @@ if __name__ == "__main__":
                 tzinfo=timezone.utc,
             )
 
-            # вычисляем количество секунд до следующей полночи и если больше 0, то спим до следующей полночи
-            sleep_seconds = (next_midnight - now).total_seconds() + 5
-            if sleep_seconds > 0:
-                server.logger.info(f"sleep until UTC midnight: {sleep_seconds:.0f}s")
-                time.sleep(sleep_seconds)
+            # Ждём до следующей полночи UTC, логируя остаток каждый час (в часах и секундах).
+            while True:
+                now = datetime.now(timezone.utc)
+                remaining = (next_midnight - now).total_seconds()
+                if remaining <= 0:
+                    break
+                hours = int(remaining // 3600)
+                seconds = int(remaining % 3600)
+                server.logger.info(f"time until UTC midnight: {hours}h {seconds}s")
+                time.sleep(min(3600, remaining))
+
+            # небольшой буфер, чтобы точно перейти за границу дня
+            time.sleep(5)
 
             # получаем предыдущую дату (отчет за прошедшие сутки)
             run_day = datetime.now(timezone.utc).date() - timedelta(days=1)
