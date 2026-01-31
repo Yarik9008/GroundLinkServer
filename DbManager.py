@@ -740,6 +740,64 @@ class DbManager:
 
         return stats, totals
 
+    # Статистика коммерческих пролётов по станциям за период (диапазон дат).
+    def get_commercial_passes_stats_by_station_range(
+        self,
+        start_day: date | datetime | str,
+        end_day: date | datetime | str,
+    ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+        """Возвращает (stats, totals) за период дат.
+
+        stats = {station_name: {"planned": N, "successful": N, "not_received": N}}
+        totals = {"planned": P, "successful": S, "not_received": R}
+        """
+        start_value = self._normalize_date(start_day)
+        end_value = self._normalize_date(end_day)
+        conn = self._connect()
+
+        planned_rows = conn.execute(
+            """
+            SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+            WHERE date(rx_start_time) BETWEEN ? AND ?
+            GROUP BY station_name
+            """,
+            (start_value, end_value),
+        ).fetchall()
+
+        stats: Dict[str, Dict[str, int]] = {}
+        totals = {"planned": 0, "successful": 0, "not_received": 0}
+
+        for station_name, planned in planned_rows:
+            planned = int(planned)
+            stats[station_name] = {"planned": planned, "successful": 0, "not_received": planned}
+            totals["planned"] += planned
+            totals["not_received"] += planned
+
+        received_rows = conn.execute(
+            """
+            SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+            FROM commercial_passes cp
+            INNER JOIN all_passes ap
+              ON ap.station_name = cp.station_name
+             AND ap.satellite_name = cp.satellite_name
+             AND ap.pass_date = date(cp.rx_start_time)
+             AND ap.success = 1
+            WHERE date(cp.rx_start_time) BETWEEN ? AND ?
+            GROUP BY cp.station_name
+            """,
+            (start_value, end_value),
+        ).fetchall()
+
+        for station_name, received in received_rows:
+            received = int(received)
+            if station_name in stats:
+                stats[station_name]["successful"] = received
+                stats[station_name]["not_received"] = stats[station_name]["planned"] - received
+            totals["successful"] += received
+        totals["not_received"] = totals["planned"] - totals["successful"]
+
+        return stats, totals
+
     # Количество коммерческих пролётов, принятых за день (есть успешная запись в all_passes).
     def get_commercial_passes_received_count(
         self,
@@ -840,6 +898,44 @@ class DbManager:
             for r in rows
         ]
 
+    # Список коммерческих пролётов за период без приёма.
+    def get_commercial_passes_not_received_list_range(
+        self,
+        start_day: date | datetime | str,
+        end_day: date | datetime | str,
+    ) -> List[Tuple[str, str, str, str, str]]:
+        """Возвращает список (station_name, satellite_name, rx_start_time, rx_end_time, graph_url) за период."""
+        start_value = self._normalize_date(start_day)
+        end_value = self._normalize_date(end_day)
+        conn = self._connect()
+        subq = """
+            (SELECT ap.graph_url FROM all_passes ap
+             WHERE ap.station_name = cp.station_name
+               AND ap.satellite_name = cp.satellite_name
+               AND ap.pass_date = date(cp.rx_start_time)
+               AND ap.success = 0
+               AND ap.graph_url IS NOT NULL AND ap.graph_url != ''
+             LIMIT 1)
+        """
+        rows = conn.execute(
+            f"""
+            SELECT cp.station_name, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+            FROM commercial_passes cp
+            LEFT JOIN all_passes ap
+              ON ap.station_name = cp.station_name
+             AND ap.satellite_name = cp.satellite_name
+             AND ap.pass_date = date(cp.rx_start_time)
+             AND ap.success = 1
+            WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND ap.id IS NULL
+            ORDER BY cp.station_name, cp.rx_start_time
+            """,
+            (start_value, end_value),
+        ).fetchall()
+        return [
+            (str(r[0]), str(r[1]), str(r[2] or ""), str(r[3] or ""), str(r[4] or "").strip())
+            for r in rows
+        ]
+
     # Возвращает статистику успешных пролетов за указанный день.
     def get_daily_success_stats(self, stat_day: date | datetime | str) -> list[list]:
         """Возвращает статистику успешных пролетов за указанный день."""
@@ -895,6 +991,58 @@ class DbManager:
         result = []
         for station_name, total, success, failed, failed_percent, snr_awg in rows:
             result.append([station_name, total, success, failed, failed_percent, snr_awg or 0.0])
+        return result
+
+    def get_range_station_stats(
+        self,
+        start_day: date | datetime | str,
+        end_day: date | datetime | str,
+    ) -> list[list]:
+        """Возвращает статистику по станциям за диапазон дат (средний SNR по всем логам)."""
+        start_value = self._normalize_date(start_day)
+        end_value = self._normalize_date(end_day)
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT station_name,
+                   SUM(total_passes) AS total_passes,
+                   SUM(success_passes) AS success_passes,
+                   SUM(failed_passes) AS failed_passes
+            FROM station_stats
+            WHERE stat_day BETWEEN ? AND ?
+            GROUP BY station_name
+            ORDER BY station_name
+            """,
+            (start_value, end_value),
+        ).fetchall()
+
+        snr_rows = conn.execute(
+            """
+            SELECT station_name, AVG(snr_awg) AS snr_awg
+            FROM all_passes
+            WHERE pass_date BETWEEN ? AND ?
+              AND snr_awg IS NOT NULL
+            GROUP BY station_name
+            """,
+            (start_value, end_value),
+        ).fetchall()
+        snr_map = {str(name): snr_awg for name, snr_awg in snr_rows}
+
+        result: list[list] = []
+        for station_name, total, success, failed in rows:
+            total_i = int(total or 0)
+            failed_i = int(failed or 0)
+            failed_percent = round((failed_i * 100.0) / total_i, 2) if total_i else 0.0
+            result.append(
+                [
+                    str(station_name),
+                    total_i,
+                    int(success or 0),
+                    failed_i,
+                    failed_percent,
+                    snr_map.get(str(station_name)) or 0.0,
+                ]
+            )
         return result
 
     # Возвращает по одному пролету с максимальной суммой SNR на станцию за день.

@@ -113,6 +113,7 @@ class GroundLinkServer:
             "failed_graphs": failed_graphs,
         }
 
+
     def print_log_day_stats(self, stats) -> None:
         """Печатает статистику успешных пролетов за день."""
         if not stats:
@@ -124,7 +125,8 @@ class GroundLinkServer:
         print(f"{Fore.CYAN}{'Станция':<30} {'Всего':>10} {'Успешных':>12} {'Пустых':>14} {'% пустых':>15} {'Средний SNR':>15}")
         print(f"{Fore.CYAN}{'-' * 110}")
 
-        for station_name, total, success, failed, failed_percent, snr_awg in stats["rows"]:
+        rows_sorted = sorted(stats["rows"], key=lambda r: float(r[4] or 0))
+        for station_name, total, success, failed, failed_percent, snr_awg in rows_sorted:
             row_color = Fore.CYAN
             if float(failed_percent) > 25:
                 row_color = Fore.RED
@@ -153,16 +155,277 @@ class GroundLinkServer:
                 for graph_url in failed_graphs[station_name]:
                     print(f"  {graph_url}")
 
-        max_passes = stats["max_passes"]
+    def build_range_pass_stats(self, start_day, end_day) -> dict:
+        stats = self.db_manager.get_range_station_stats(start_day, end_day)
 
-        if max_passes:
-            print(f"\n{Fore.CYAN + Style.BRIGHT}ФАЙЛЫ С МАКСИМАЛЬНОЙ СУММОЙ SNR ПО СТАНЦИЯМ")
-            print(f"{Fore.CYAN}{'Станция':<30} {'Файл/ID':<80} {'Сумма SNR':>15}")
-            print(f"{Fore.CYAN}{'-' * 130}")
-            for sat_pass in max_passes:
-                file_or_id = sat_pass.log_path or sat_pass.pass_id or ""
-                print(f"{Fore.CYAN}{sat_pass.station_name:<30} {file_or_id:<80} {float(sat_pass.snr_sum or 0):>15.2f}")
+        if not stats:
+            return {}
 
+        if isinstance(start_day, datetime):
+            start_display = start_day.date().isoformat()
+        elif hasattr(start_day, "isoformat"):
+            start_display = start_day.isoformat()
+        else:
+            start_display = str(start_day)
+
+        if isinstance(end_day, datetime):
+            end_display = end_day.date().isoformat()
+        elif hasattr(end_day, "isoformat"):
+            end_display = end_day.isoformat()
+        else:
+            end_display = str(end_day)
+
+        total_files = 0
+        total_success = 0
+        total_failed = 0
+        avg_values = []
+        rows = []
+
+        for station_name, total, success, failed, failed_percent, snr_awg in stats:
+            total_files += int(total or 0)
+            total_success += int(success or 0)
+            total_failed += int(failed or 0)
+            if total and snr_awg is not None:
+                avg_values.append(float(snr_awg))
+            rows.append((station_name, total, success, failed, failed_percent, snr_awg))
+
+        total_failed_percent = (total_failed * 100.0 / total_files) if total_files else 0.0
+        overall_avg = (sum(avg_values) / len(avg_values)) if avg_values else 0.0
+
+        return {
+            "period_display": f"{start_display} — {end_display}",
+            "rows": rows,
+            "totals": {
+                "total_files": total_files,
+                "total_success": total_success,
+                "total_failed": total_failed,
+                "total_failed_percent": total_failed_percent,
+                "overall_avg": overall_avg,
+            },
+        }
+
+
+    def print_log_period_stats(self, stats, title: str) -> None:
+        """Печатает статистику успешных пролетов за период."""
+        if not stats:
+            self.logger.info("no period stats found")
+            return
+        period_display = stats["period_display"]
+
+        print(f"\n{Fore.CYAN + Style.BRIGHT}{title}  {period_display}")
+        print(f"{Fore.CYAN}{'Станция':<30} {'Всего':>10} {'Успешных':>12} {'Пустых':>14} {'% пустых':>15} {'Средний SNR':>15}")
+        print(f"{Fore.CYAN}{'-' * 110}")
+
+        rows_sorted = sorted(stats["rows"], key=lambda r: float(r[4] or 0))
+        for station_name, total, success, failed, failed_percent, snr_awg in rows_sorted:
+            row_color = Fore.CYAN
+            if float(failed_percent) > 25:
+                row_color = Fore.RED
+            elif float(failed_percent) > 5:
+                row_color = Fore.YELLOW
+            else:
+                row_color = Fore.GREEN
+            print(
+                f"{row_color}{station_name:<30} {int(total):>10} {int(success):>12} "
+                f"{int(failed):>14} {float(failed_percent):>14.1f}% {float(snr_awg or 0):>15.2f}"
+            )
+
+        totals = stats["totals"]
+        print(f"{Fore.CYAN}{'-' * 110}")
+        print(
+            f"{Fore.GREEN + Style.BRIGHT}{'ИТОГО':<30} {totals['total_files']:>10} {totals['total_success']:>12} "
+            f"{totals['total_failed']:>14} {totals['total_failed_percent']:>14.1f}% {totals['overall_avg']:>15.2f}"
+        )
+
+
+    def build_week_pass_stats(self, end_day) -> dict:
+        if isinstance(end_day, datetime):
+            end_day = end_day.date()
+        start_day = end_day - timedelta(days=6)
+        return self.build_range_pass_stats(start_day, end_day)
+
+
+    def print_log_week_stats(self, stats) -> None:
+        self.print_log_period_stats(stats, "ИТОГОВАЯ СВОДКА ПО СТАНЦИЯМ ЗА НЕДЕЛЮ")
+
+
+    def build_month_pass_stats(self, end_day) -> dict:
+        if isinstance(end_day, datetime):
+            end_day = end_day.date()
+        start_day = end_day.replace(day=1)
+        return self.build_range_pass_stats(start_day, end_day)
+
+
+    def print_log_month_stats(self, stats) -> None:
+        self.print_log_period_stats(stats, "ИТОГОВАЯ СВОДКА ПО СТАНЦИЯМ ЗА МЕСЯЦ")
+
+    # --- Коммерческие пролёты ---
+
+    def build_comm_day_stats(self, day, up_to_datetime=None) -> dict:
+        """Собирает статистику коммерческих пролётов за день."""
+        stats, totals = self.db_manager.get_commercial_passes_stats_by_station(day, up_to_datetime)
+        if not stats and totals["planned"] == 0:
+            return None
+        if isinstance(day, datetime):
+            date_display = day.date().isoformat()
+        elif hasattr(day, "isoformat"):
+            date_display = day.isoformat()
+        else:
+            date_display = str(day)
+        rows = []
+        for station_name, s in stats.items():
+            planned = s["planned"]
+            successful = s["successful"]
+            not_received = s["not_received"]
+            pct = (not_received * 100.0 / planned) if planned else 0.0
+            rows.append((station_name, planned, successful, not_received, pct))
+        total_pct = (totals["not_received"] * 100.0 / totals["planned"]) if totals["planned"] else 0.0
+        not_received_list = self.db_manager.get_commercial_passes_not_received_list(day, up_to_datetime)
+        return {
+            "date_display": date_display,
+            "rows": rows,
+            "totals": {
+                "planned": totals["planned"],
+                "successful": totals["successful"],
+                "not_received": totals["not_received"],
+                "not_received_percent": total_pct,
+            },
+            "not_received_list": not_received_list,
+        }
+
+    def print_comm_day_stats(self, stats) -> None:
+        """Печатает статистику коммерческих пролётов за день."""
+        if not stats:
+            self.logger.info("no commercial stats for day")
+            return
+        date_display = stats["date_display"]
+        print(f"\n{Fore.BLUE + Style.BRIGHT}КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА ДЕНЬ  {date_display}")
+        print(f"{Fore.BLUE}{'Станция':<30} {'Заказано':>12} {'Принято':>12} {'Не принято':>14} {'% не принято':>15}")
+        print(f"{Fore.BLUE}{'-' * 90}")
+        rows_sorted = sorted(stats["rows"], key=lambda r: float(r[4] or 0))
+        for station_name, planned, successful, not_received, pct in rows_sorted:
+            row_color = Fore.BLUE
+            if float(pct) > 25:
+                row_color = Fore.RED
+            elif float(pct) > 5:
+                row_color = Fore.YELLOW
+            else:
+                row_color = Fore.GREEN
+            print(
+                f"{row_color}{station_name:<30} {int(planned):>12} {int(successful):>12} "
+                f"{int(not_received):>14} {float(pct):>14.1f}%"
+            )
+        totals = stats["totals"]
+        print(f"{Fore.BLUE}{'-' * 90}")
+        print(
+            f"{Fore.GREEN + Style.BRIGHT}{'ИТОГО':<30} {totals['planned']:>12} {totals['successful']:>12} "
+            f"{totals['not_received']:>14} {totals['not_received_percent']:>14.1f}%"
+        )
+        not_received_list = stats.get("not_received_list") or []
+        if not_received_list:
+            print(f"\n{Fore.BLUE + Style.BRIGHT}НЕ ПРИНЯТЫЕ КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА ДЕНЬ")
+            for station_name, satellite_name, rx_start, rx_end, graph_url in not_received_list:
+                time_str = f"{rx_start} — {rx_end}" if rx_end else rx_start
+                line = f"  {Fore.BLUE}{station_name} | {satellite_name} | {time_str}"
+                if graph_url:
+                    line += f" | {graph_url}"
+                print(line)
+
+    def build_comm_period_stats(self, start_day, end_day) -> dict:
+        """Собирает статистику коммерческих пролётов за период."""
+        stats, totals = self.db_manager.get_commercial_passes_stats_by_station_range(start_day, end_day)
+        if not stats and totals["planned"] == 0:
+            return {}
+        if isinstance(start_day, datetime):
+            start_display = start_day.date().isoformat()
+        elif hasattr(start_day, "isoformat"):
+            start_display = start_day.isoformat()
+        else:
+            start_display = str(start_day)
+        if isinstance(end_day, datetime):
+            end_display = end_day.date().isoformat()
+        elif hasattr(end_day, "isoformat"):
+            end_display = end_day.isoformat()
+        else:
+            end_display = str(end_day)
+        rows = []
+        for station_name, s in stats.items():
+            planned = s["planned"]
+            successful = s["successful"]
+            not_received = s["not_received"]
+            pct = (not_received * 100.0 / planned) if planned else 0.0
+            rows.append((station_name, planned, successful, not_received, pct))
+        total_pct = (totals["not_received"] * 100.0 / totals["planned"]) if totals["planned"] else 0.0
+        not_received_list = self.db_manager.get_commercial_passes_not_received_list_range(start_day, end_day)
+        return {
+            "period_display": f"{start_display} — {end_display}",
+            "rows": rows,
+            "totals": {
+                "planned": totals["planned"],
+                "successful": totals["successful"],
+                "not_received": totals["not_received"],
+                "not_received_percent": total_pct,
+            },
+            "not_received_list": not_received_list,
+        }
+
+    def print_comm_period_stats(self, stats, title: str) -> None:
+        """Печатает статистику коммерческих пролётов за период."""
+        if not stats:
+            self.logger.info("no commercial period stats")
+            return
+        period_display = stats["period_display"]
+        print(f"\n{Fore.BLUE + Style.BRIGHT}{title}  {period_display}")
+        print(f"{Fore.BLUE}{'Станция':<30} {'Заказано':>12} {'Принято':>12} {'Не принято':>14} {'% не принято':>15}")
+        print(f"{Fore.BLUE}{'-' * 90}")
+        rows_sorted = sorted(stats["rows"], key=lambda r: float(r[4] or 0))
+        for station_name, planned, successful, not_received, pct in rows_sorted:
+            row_color = Fore.BLUE
+            if float(pct) > 25:
+                row_color = Fore.RED
+            elif float(pct) > 5:
+                row_color = Fore.YELLOW
+            else:
+                row_color = Fore.GREEN
+            print(
+                f"{row_color}{station_name:<30} {int(planned):>12} {int(successful):>12} "
+                f"{int(not_received):>14} {float(pct):>14.1f}%"
+            )
+        totals = stats["totals"]
+        print(f"{Fore.BLUE}{'-' * 90}")
+        print(
+            f"{Fore.GREEN + Style.BRIGHT}{'ИТОГО':<30} {totals['planned']:>12} {totals['successful']:>12} "
+            f"{totals['not_received']:>14} {totals['not_received_percent']:>14.1f}%"
+        )
+        not_received_list = stats.get("not_received_list") or []
+        if not_received_list:
+            print(f"\n{Fore.BLUE + Style.BRIGHT}НЕ ПРИНЯТЫЕ КОММЕРЧЕСКИЕ ПРОЛЁТЫ")
+            for station_name, satellite_name, rx_start, rx_end, graph_url in not_received_list:
+                time_str = f"{rx_start} — {rx_end}" if rx_end else rx_start
+                line = f"  {Fore.BLUE}{station_name} | {satellite_name} | {time_str}"
+                if graph_url:
+                    line += f" | {graph_url}"
+                print(line)
+
+    def build_comm_week_stats(self, end_day) -> dict:
+        """Собирает статистику коммерческих пролётов за 7 дней."""
+        if isinstance(end_day, datetime):
+            end_day = end_day.date()
+        start_day = end_day - timedelta(days=6)
+        return self.build_comm_period_stats(start_day, end_day)
+
+    def print_comm_week_stats(self, stats) -> None:
+        self.print_comm_period_stats(stats, "КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА НЕДЕЛЮ")
+
+    def build_comm_month_stats(self, end_day) -> dict:
+        """Собирает статистику коммерческих пролётов за месяц."""
+        if isinstance(end_day, datetime):
+            end_day = end_day.date()
+        start_day = end_day.replace(day=1)
+        return self.build_comm_period_stats(start_day, end_day)
+
+    def print_comm_month_stats(self, stats) -> None:
+        self.print_comm_period_stats(stats, "КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА МЕСЯЦ")
 
     def main(
         self, 
@@ -221,8 +484,22 @@ class GroundLinkServer:
         # Выводим статистику по дням за указанный диапазон
         current_day = start_day
         while current_day <= end_day:
+
             daily_stats = self.buily_daily_pass_stats(current_day)
             self.print_log_day_stats(daily_stats)
+
+            # Коммерческие пролёты за день
+            now_utc = datetime.now(timezone.utc)
+            is_today = (current_day == now_utc.date())
+            comm_up_to = now_utc if is_today else None
+            comm_day_stats = self.build_comm_day_stats(current_day, up_to_datetime=comm_up_to)
+            self.print_comm_day_stats(comm_day_stats)
+
+            # Статистика за 7 дней (все пролёты, затем коммерческие)
+            week_stats = self.build_week_pass_stats(current_day)
+            self.print_log_week_stats(week_stats)
+            comm_week_stats = self.build_comm_week_stats(current_day)
+            self.print_comm_week_stats(comm_week_stats)
 
             if daily_stats and (email or debug_email):
                 target_date = current_day.strftime("%Y%m%d")
@@ -308,10 +585,7 @@ class GroundLinkServer:
                     % (comm_planned, comm_received)
                 )
                 email_cfg = (self.config or {}).get("email") or {}
-                debug_recipient = (
-                    email_cfg.get("debug_recipient")
-                    or os.getenv("EMAIL_DEBUG_RECIPIENT")
-                ) if debug_email else None
+                debug_recipient = email_cfg.get("debug_recipient") if debug_email else None
                 settings = self.email_client.get_email_settings(debug_recipient=debug_recipient)
                 if not settings.get("enabled"):
                     self.logger.info("email disabled by settings")
@@ -472,19 +746,19 @@ if __name__ == "__main__":
             )
 
             # вычисляем количество секунд до следующей полночи и если больше 0, то спим до следующей полночи
-            sleep_seconds = (next_midnight - now).total_seconds()
+            sleep_seconds = (next_midnight - now).total_seconds() + 5
             if sleep_seconds > 0:
                 server.logger.info(f"sleep until UTC midnight: {sleep_seconds:.0f}s")
                 time.sleep(sleep_seconds)
 
-            # получаем текущую дату
-            run_day = datetime.now(timezone.utc).date()
+            # получаем предыдущую дату (отчет за прошедшие сутки)
+            run_day = datetime.now(timezone.utc).date() - timedelta(days=1)
 
             # запускаем сервер
             server.main(
                 start_day=run_day,
-                end_day=run_day + timedelta(days=1),
-                email=args.off_email,
+                end_day=run_day,
+                email=not args.off_email,
                 debug_email=args.debag_email,
             )
 
