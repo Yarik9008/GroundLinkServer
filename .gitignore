@@ -9,3 +9,6 @@ venv/
 ENV/
 .venv
 telegram.session
+server_logs/
+report/
+passes_logs/
