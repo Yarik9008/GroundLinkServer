@@ -1,3 +1,10 @@
+"""GroundLinkServer — основной сервер мониторинга наземных станций приёма.
+
+Оркестрирует загрузку логов с портала EUS, анализ пролётов, синхронизацию
+коммерческих пролётов из Telegram, формирование статистики и отправку отчётов.
+Запуск: python GroundLinkServer.py [start_date] [end_date] [--sch] [--off-email] [--debag-email].
+"""
+
 import argparse
 import json
 import os
@@ -6,7 +13,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-
 from Logger import Logger
 from GraphGenerator import GraphGenerator
 from EusLogDownloader import EusLogDownloader
@@ -20,9 +26,38 @@ colorama_init(autoreset=True)
 
 
 class GroundLinkServer:
-    
-    def __init__(self, path_log:str) -> None:
-        # Инициализация основного логера
+    """Основной сервер: загрузка логов, анализ, БД, статистика, email.
+
+    Использует EusLogDownloader, PassAnalyzer, DbManager, TelClient, EmailClient,
+    GraphGenerator. Конфигурация — config.json в каталоге скрипта.
+
+    Методы:
+        __init__: Инициализация логгеров, БД, загрузчика, анализатора, email, графиков.
+        _load_config: Загрузка config.json.
+        buily_daily_pass_stats: Сбор статистики пролётов за день.
+        print_log_day_stats: Вывод статистики пролётов за день в консоль.
+        build_range_pass_stats: Сбор статистики пролётов за период.
+        print_log_period_stats: Вывод статистики пролётов за период.
+        build_week_pass_stats, print_log_week_stats: Статистика за 7 дней.
+        build_month_pass_stats, print_log_month_stats: Статистика за месяц.
+        build_comm_day_stats, print_comm_day_stats: Коммерческие пролёты за день.
+        build_comm_period_stats, print_comm_period_stats: Коммерческие за период.
+        build_comm_week_stats, print_comm_week_stats: Коммерческие за 7 дней.
+        build_comm_month_stats, print_comm_month_stats: Коммерческие за месяц.
+        main: Основной цикл: sync Telegram → backfill → загрузка → статистика → email.
+        _download_and_analyze_range: Загрузка логов, анализ, запись в БД.
+
+    Атрибуты:
+        logger, config, db_manager, eus, analyzer, email_client, graph_generator.
+    """
+
+    # Инициализация сервера: логгеры, конфиг, БД, загрузчик, анализатор, email, графики.
+    def __init__(self, path_log: str) -> None:
+        """Инициализирует сервер и все компоненты.
+
+        Args:
+            path_log: Путь к каталогу логов (с завершающим разделителем).
+        """
         self.logger = Logger(path_log=path_log, log_level="info", logger_name="MAIN")
 
         # загрузка конфига
@@ -47,9 +82,13 @@ class GroundLinkServer:
         # генератор графиков (использует db_manager для данных)
         self.graph_generator = GraphGenerator(db_manager=self.db_manager, logger=self.logger)
 
-
+    # Загрузка config.json из каталога скрипта.
     def _load_config(self, path_log: str) -> dict:
-        """Загружает config.json из каталога скрипта. При ошибке возвращает {}."""
+        """Загружает config.json из каталога скрипта.
+
+        Returns:
+            dict: Конфигурация или {} при ошибке.
+        """
         base_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(base_dir, "config.json")
         try:
@@ -63,7 +102,16 @@ class GroundLinkServer:
             return {}
 
 
+    # Сбор статистики пролётов за день (все станции, пустые, итоги).
     def buily_daily_pass_stats(self, day):
+        """Собирает статистику пролётов за день (rows, totals, max_passes, failed_graphs).
+
+        Args:
+            day: Дата (date или datetime).
+
+        Returns:
+            dict с date_display, rows, totals, max_passes, failed_graphs или None.
+        """
         stats = self.db_manager.get_daily_station_stats(day)
         
         if not stats:
@@ -113,7 +161,7 @@ class GroundLinkServer:
             "failed_graphs": failed_graphs,
         }
 
-
+    # Вывод статистики пролётов за день в консоль.
     def print_log_day_stats(self, stats) -> None:
         """Печатает статистику успешных пролетов за день."""
         if not stats:
@@ -155,7 +203,9 @@ class GroundLinkServer:
                 for graph_url in failed_graphs[station_name]:
                     print(f"  {graph_url}")
 
+    # Сбор статистики пролётов за период дат.
     def build_range_pass_stats(self, start_day, end_day) -> dict:
+        """Собирает агрегированную статистику пролётов за диапазон дат."""
         stats = self.db_manager.get_range_station_stats(start_day, end_day)
 
         if not stats:
@@ -204,7 +254,7 @@ class GroundLinkServer:
             },
         }
 
-
+    # Вывод статистики пролётов за период в консоль.
     def print_log_period_stats(self, stats, title: str) -> None:
         """Печатает статистику успешных пролетов за период."""
         if not stats:
@@ -237,32 +287,36 @@ class GroundLinkServer:
             f"{totals['total_failed']:>14} {totals['total_failed_percent']:>14.1f}% {totals['overall_avg']:>15.2f}"
         )
 
-
+    # Сбор статистики пролётов за 7 дней (end_day - 6 .. end_day).
     def build_week_pass_stats(self, end_day) -> dict:
         if isinstance(end_day, datetime):
             end_day = end_day.date()
         start_day = end_day - timedelta(days=6)
         return self.build_range_pass_stats(start_day, end_day)
 
-
+    # Вывод статистики пролётов за неделю.
     def print_log_week_stats(self, stats) -> None:
         self.print_log_period_stats(stats, "ИТОГОВАЯ СВОДКА ПО СТАНЦИЯМ ЗА НЕДЕЛЮ")
 
-
+    # Сбор статистики пролётов за месяц (с 1-го по end_day).
     def build_month_pass_stats(self, end_day) -> dict:
         if isinstance(end_day, datetime):
             end_day = end_day.date()
         start_day = end_day.replace(day=1)
         return self.build_range_pass_stats(start_day, end_day)
 
-
+    # Вывод статистики пролётов за месяц.
     def print_log_month_stats(self, stats) -> None:
         self.print_log_period_stats(stats, "ИТОГОВАЯ СВОДКА ПО СТАНЦИЯМ ЗА МЕСЯЦ")
 
-    # --- Коммерческие пролёты ---
-
+    # Сбор статистики коммерческих пролётов за день.
     def build_comm_day_stats(self, day, up_to_datetime=None) -> dict:
-        """Собирает статистику коммерческих пролётов за день."""
+        """Собирает статистику коммерческих пролётов за день (rows, totals, not_received_list).
+
+        Args:
+            day: Дата.
+            up_to_datetime: Для «сегодня» — учитывать только пролёты до этого момента.
+        """
         stats, totals = self.db_manager.get_commercial_passes_stats_by_station(day, up_to_datetime)
         if not stats and totals["planned"] == 0:
             return None
@@ -293,6 +347,7 @@ class GroundLinkServer:
             "not_received_list": not_received_list,
         }
 
+    # Вывод статистики коммерческих пролётов за день в консоль.
     def print_comm_day_stats(self, stats) -> None:
         """Печатает статистику коммерческих пролётов за день."""
         if not stats:
@@ -331,6 +386,7 @@ class GroundLinkServer:
                     line += f" | {graph_url}"
                 print(line)
 
+    # Сбор статистики коммерческих пролётов за период.
     def build_comm_period_stats(self, start_day, end_day) -> dict:
         """Собирает статистику коммерческих пролётов за период."""
         stats, totals = self.db_manager.get_commercial_passes_stats_by_station_range(start_day, end_day)
@@ -369,6 +425,7 @@ class GroundLinkServer:
             "not_received_list": not_received_list,
         }
 
+    # Вывод статистики коммерческих пролётов за период в консоль.
     def print_comm_period_stats(self, stats, title: str) -> None:
         """Печатает статистику коммерческих пролётов за период."""
         if not stats:
@@ -407,6 +464,7 @@ class GroundLinkServer:
                     line += f" | {graph_url}"
                 print(line)
 
+    # Сбор статистики коммерческих пролётов за 7 дней.
     def build_comm_week_stats(self, end_day) -> dict:
         """Собирает статистику коммерческих пролётов за 7 дней."""
         if isinstance(end_day, datetime):
@@ -414,9 +472,11 @@ class GroundLinkServer:
         start_day = end_day - timedelta(days=6)
         return self.build_comm_period_stats(start_day, end_day)
 
+    # Вывод статистики коммерческих пролётов за неделю.
     def print_comm_week_stats(self, stats) -> None:
         self.print_comm_period_stats(stats, "КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА НЕДЕЛЮ")
 
+    # Сбор статистики коммерческих пролётов за месяц.
     def build_comm_month_stats(self, end_day) -> dict:
         """Собирает статистику коммерческих пролётов за месяц."""
         if isinstance(end_day, datetime):
@@ -424,17 +484,26 @@ class GroundLinkServer:
         start_day = end_day.replace(day=1)
         return self.build_comm_period_stats(start_day, end_day)
 
+    # Вывод статистики коммерческих пролётов за месяц.
     def print_comm_month_stats(self, stats) -> None:
         self.print_comm_period_stats(stats, "КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА МЕСЯЦ")
 
+    # Основной цикл: синхронизация Telegram, загрузка, анализ, статистика, email.
     def main(
-        self, 
-        start_day=None, # дата начала
-        end_day=None, # дата конца 
-        email: bool = False, # отправка email
-        debug_email: bool = False # отладочная отправка email
+        self,
+        start_day=None,
+        end_day=None,
+        email: bool = False,
+        debug_email: bool = False,
         ):
-        # Определяем диапазон дат.
+        """Основной цикл: sync Telegram → backfill → загрузка логов → статистика → email.
+
+        Args:
+            start_day: Дата начала (если None и end_day None — сегодня).
+            end_day: Дата конца (если None — равно start_day).
+            email: Включить отправку email-сводки.
+            debug_email: Отладочная отправка (только на debug_recipient).
+        """
         if start_day is None and end_day is None:
             start_day = datetime.now(timezone.utc).date()
             end_day = start_day
@@ -633,9 +702,14 @@ class GroundLinkServer:
                         self.logger.warning(f"email failed for {target_date}")
             current_day += timedelta(days=1)
 
-
+    # Загрузка логов EUS, анализ пролётов и запись в БД.
     def _download_and_analyze_range(self, start_day, end_day) -> None:
-        # путь к каталогу для сохранения логов
+        """Загружает логи с EUS, анализирует пролёты и записывает в БД.
+
+        Args:
+            start_day: Дата начала диапазона.
+            end_day: Дата конца диапазона.
+        """
         base_dir = os.path.dirname(__file__)
         passes_logs_dir = os.path.join(base_dir, "passes_logs")
         # Загружаем HTML страницу со всем диапазоном дат.

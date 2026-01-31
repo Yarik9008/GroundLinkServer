@@ -60,7 +60,7 @@ python GroundLinkServer.py [start_date] [end_date] [--sch] [--off-email] [--deba
 - **start_date**, **end_date** — даты в формате `YYYYMMDD`. Если не указаны — обрабатывается только текущий день (UTC).
 - **--sch** — режим по расписанию: ожидание до 00:00 UTC, затем один прогон за текущий день (удобно для cron).
 - **--off-email** — не отправлять email.
-- **--debag-email** — отладочная отправка: письмо уходит на `debug_recipient` из конфига (или `EMAIL_DEBUG_RECIPIENT`).
+- **--debag-email** — отладочная отправка: письмо уходит только на `debug_recipient` из конфига.
 
 Примеры:
 
@@ -73,6 +73,33 @@ python GroundLinkServer.py 20260101 20260115 --off-email
 
 # По расписанию (каждую полночь UTC)
 python GroundLinkServer.py --sch
+```
+
+## Сервис systemd
+
+Проект содержит unit-файл `groundlinkserver.service` для автозапуска в режиме планировщика (`--sch`).
+
+Установка и запуск:
+
+```bash
+sudo cp /root/lorett/GroundLinkServer/groundlinkserver.service /etc/systemd/system/groundlinkserver.service
+sudo systemctl daemon-reload
+sudo systemctl enable groundlinkserver.service
+sudo systemctl start groundlinkserver.service
+```
+
+Проверка статуса и логи:
+
+```bash
+sudo systemctl status groundlinkserver.service --no-pager
+journalctl -u groundlinkserver.service -n 100 --no-pager
+```
+
+Остановка и отключение:
+
+```bash
+sudo systemctl stop groundlinkserver.service
+sudo systemctl disable groundlinkserver.service
 ```
 
 ## Логика работы (кратко)

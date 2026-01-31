@@ -1,3 +1,21 @@
+"""EmailClient — отправка писем со статистикой по станциям приёма.
+
+Модуль формирует HTML-письма со сводкой по пролётам и коммерческим сессиям,
+поддерживает inline-графики и вложения. Настройки берутся из config.json
+(секция "email"), переменных окружения и (fallback) test_email.py.
+
+Структура config["email"]:
+    enabled, smtp_server, smtp_port, sender_email, sender_password,
+    recipient_email (или to), cc (или cc_emails), subject, attach_report.
+
+Пример использования:
+    client = EmailClient(logger=logger, config=config)
+    settings = client.get_email_settings()
+    if settings["enabled"]:
+        body, inline_images = client.build_stats_email_body(target_date, all_results, ...)
+        client.send_stats_email(..., body=body, inline_images=inline_images)
+"""
+
 import os
 import re
 import smtplib
@@ -9,31 +27,53 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
-
 from Logger import Logger
 
 
-
-# ogershenzon@gmail.com
-
-
 class EmailClient:
-    """Отправка писем со статистикой по шаблону.
+    """Клиент для отправки писем со статистикой по станциям приёма.
 
-    Основано на логике из test/old_GroundLinkServer.py:
-        - загрузка настроек SMTP,
-        - формирование HTML-шаблона письма,
-        - отправка письма с вложениями и inline-изображениями.
+    Отвечает за:
+        - Сбор настроек SMTP из config, env и test_email.py
+        - Формирование HTML-шаблона письма (таблицы, графики, списки пролётов)
+        - Отправку через SMTP с поддержкой inline-изображений и вложений
+
+    Методы:
+        __init__: Инициализация клиента с логгером и конфигурацией.
+        _load_email_defaults_from_test_email: Загрузка SMTP-настроек из test_email.py.
+        get_email_settings: Получение настроек email из config, env и test_email.
+        build_stats_email_body: Формирование HTML-тела письма со статистикой и графиками.
+        send_stats_email: Отправка письма через SMTP с inline-изображениями и вложениями.
+
+    Атрибуты:
+        logger: Логгер для сообщений.
+        config: Конфигурация (dict), используется при get_email_settings если не передан явно.
     """
 
+    # Инициализация клиента с логгером и конфигурацией.
     def __init__(self, logger: Logger, config: Optional[Dict[str, Any]] = None) -> None:
+        """Инициализирует клиент.
+
+        Args:
+            logger: Логгер (обязателен).
+            config: Конфигурация приложения. Секция email используется для настроек SMTP.
+
+        Raises:
+            ValueError: Если logger не передан.
+        """
         if logger is None:
             raise ValueError("logger is required")
         self.logger = logger
         self.config = (config or {}) if isinstance(config, dict) else {}
 
+    # Загрузка SMTP-настроек по умолчанию из test_email.py.
     def _load_email_defaults_from_test_email(self) -> Dict[str, Any]:
-        """Пытается загрузить SMTP-настройки по умолчанию из test_email.py."""
+        """Загружает SMTP-настройки по умолчанию из test_email.py (если модуль доступен).
+
+        Returns:
+            dict: Ключи smtp_server, smtp_port, sender_email, sender_password,
+                  recipient_email, subject. Пустой dict при ошибке.
+        """
         try:
             import test_email as te  # type: ignore
             return {
@@ -47,8 +87,27 @@ class EmailClient:
         except Exception:
             return {}
 
-    def get_email_settings(self, config: Optional[Dict[str, Any]] = None, debug_recipient: Optional[str] = None) -> Dict[str, Any]:
-        """Возвращает настройки email с учетом config/env/test_email. Если config не передан — используется конфиг из инициализации."""
+    # Возвращает настройки email из config, env и test_email.
+    def get_email_settings(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        debug_recipient: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Возвращает настройки для отправки email.
+
+        Источники (в порядке приоритета): config["email"], переменные окружения,
+        test_email.py. Переменные окружения: EMAIL_ENABLED, SMTP_SERVER, SMTP_PORT,
+        SENDER_EMAIL, SENDER_PASSWORD, RECIPIENT_EMAIL, EMAIL_CC, EMAIL_SUBJECT,
+        EMAIL_ATTACH_REPORT.
+
+        Args:
+            config: Конфигурация (если None — используется self.config).
+            debug_recipient: Адрес для отладочной отправки (все письма только на него, CC сбрасывается).
+
+        Returns:
+            dict с ключами: enabled, smtp_server, smtp_port, sender_email,
+            sender_password, recipients, cc_recipients, subject, attach_report.
+        """
         defaults = self._load_email_defaults_from_test_email()
         cfg = config if config is not None else self.config
         email_cfg = (cfg or {}).get("email", {}) if isinstance(cfg, dict) else {}
@@ -136,6 +195,7 @@ class EmailClient:
             "attach_report": attach_report,
         }
 
+    # Формирует HTML-тело письма со статистикой и графиками.
     def build_stats_email_body(
         self,
         target_date: str,
@@ -147,8 +207,29 @@ class EmailClient:
         comm_summary_7d_chart_path: Optional[Path] = None,
         comm_links: Optional[Dict[str, List[str]]] = None,
         comm_not_received_list: Optional[List[Tuple[str, str, str, str, str]]] = None,
-    ) -> Tuple[str, Dict[str, Path]]:
-        """Формирует HTML письмо — точная копия test/old_GroundLinkServer.build_stats_email_body."""
+        ) -> Tuple[str, Dict[str, Path]]:
+        """Формирует HTML-тело письма со статистикой и графиками.
+
+        Структура письма: блок коммерческих пролётов (если передан), общая статистика
+        по станциям, сводный график за 7 дней, графики по станциям (лучший пролёт,
+        % пустых за 7 дней, список пустых).
+
+        Args:
+            target_date: Дата в формате YYYYMMDD.
+            all_results: {station_name: {files, successful_passes, unsuccessful_passes,
+                        avg_snr, max_snr_filename, unsuccessful_filenames, best_graph_path,
+                        station_7d_chart_path}}.
+            graphs_dir: Каталог с графиками для поиска best_graph по имени файла.
+            summary_7d_chart_path: Путь к сводному графику % пустых за 7 дней.
+            comm_stats: {station: {planned, successful, not_received}} для коммерческих.
+            comm_totals: {planned, successful, not_received} — итоги коммерческих.
+            comm_summary_7d_chart_path: График % непринятых коммерческих за 7 дней.
+            comm_links: {successful: [urls], unsuccessful: [urls]} — ссылки на графики.
+            comm_not_received_list: [(station, satellite, rx_start, rx_end, graph_url), ...].
+
+        Returns:
+            (html_body: str, inline_images: {cid: Path}) — тело письма и карта CID→файл.
+        """
         date_display = f"{target_date[6:8]}.{target_date[4:6]}.{target_date[0:4]}"
         inline_images: Dict[str, Path] = {}
 
@@ -727,6 +808,7 @@ class EmailClient:
         ])
         return "\n".join(html_lines), inline_images
 
+    # Отправляет письмо через SMTP с inline-изображениями и вложениями.
     def send_stats_email(
         self,
         *,
@@ -740,8 +822,26 @@ class EmailClient:
         body: str,
         attachments: Optional[List[Path]] = None,
         inline_images: Optional[Dict[str, Path]] = None,
-    ) -> bool:
-        """Отправляет письмо со статистикой через SMTP."""
+        ) -> bool:
+        """Отправляет письмо через SMTP с поддержкой HTML, inline-изображений и вложений.
+
+        Использует SMTP_SSL для порта 465, starttls() для 587, обычный SMTP для остальных.
+
+        Args:
+            smtp_server: Адрес SMTP-сервера.
+            smtp_port: Порт (465 — SSL, 587 — STARTTLS).
+            sender_email: Адрес отправителя.
+            sender_password: Пароль (или app password).
+            recipients: Список получателей.
+            cc_recipients: Список получателей в копии.
+            subject: Тема письма.
+            body: Тело (HTML или plain text).
+            attachments: Пути к файлам для вложений.
+            inline_images: {content_id: Path} — изображения для вставки в body по cid:content_id.
+
+        Returns:
+            True при успешной отправке, False при ошибке или отсутствии получателей.
+        """
         if not sender_email or not sender_password or not recipients:
             self.logger.warning("Email: не заданы sender/password/recipients — отправка пропущена")
             return False

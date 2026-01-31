@@ -1,10 +1,3 @@
-"""
-Генерация PNG-графиков для отчётов и писем.
-
-Класс GraphGenerator строит графики % пустых пролетов за 7 дней
-(общий и по станциям), используя данные из БД.
-"""
-
 import logging
 from datetime import datetime, timedelta, time
 from pathlib import Path
@@ -12,20 +5,45 @@ from typing import Any, List, Optional, Set, Tuple
 
 
 class GraphGenerator:
-    """
-    Генератор графиков по данным из БД.
+    """Генератор PNG-графиков по данным из БД.
 
-    Ожидает у db_manager метод get_daily_success_stats(stat_day),
-    возвращающий список строк [station_name, total, success, failed, failed_percent, snr_awg],
-    последняя строка может быть итогом: ["total", total_all, ...].
+    Строит линейные графики % пустых пролётов и % не принятых коммерческих
+    за последние N дней. Требует у db_manager методы:
+        - get_daily_success_stats(stat_day) → [[station, total, success, failed, failed_percent], ...]
+        - get_commercial_passes_stats_by_station(day, up_to_datetime) → (stats, totals)
+
+    Методы:
+        __init__: Инициализация с db_manager и логгером.
+        _ensure_matplotlib: Импорт matplotlib в режиме Agg.
+        _plot_unsuccessful_7d: Отрисовка линейного графика % по дням.
+        generate_overall_unsuccessful_7d: График % пустых за 7 дней (все станции или по фильтру).
+        generate_comm_unsuccessful_7d: График % не принятых коммерческих за 7 дней.
+        generate_station_unsuccessful_7d: График % пустых за 7 дней по одной станции.
+
+    Атрибуты:
+        db_manager: Менеджер БД для получения статистики.
+        logger: Логгер для предупреждений и ошибок.
     """
 
+    # Инициализация генератора с db_manager и логгером.
     def __init__(self, db_manager: Any, logger: Optional[Any] = None) -> None:
+        """Инициализирует генератор.
+
+        Args:
+            db_manager: Менеджер БД (DbManager) с методами get_daily_success_stats,
+                        get_commercial_passes_stats_by_station.
+            logger: Опциональный логгер для сообщений об ошибках.
+        """
         self.db_manager = db_manager
         self.logger = logger
 
+    # Импорт matplotlib в non-GUI режиме (Agg).
     def _ensure_matplotlib(self) -> bool:
-        """Импортирует matplotlib в non-GUI режиме. Возвращает True при успехе."""
+        """Проверяет доступность matplotlib и настраивает backend Agg.
+
+        Returns:
+            True если matplotlib доступен, False при ImportError.
+        """
         try:
             import matplotlib
             matplotlib.use("Agg")
@@ -37,6 +55,7 @@ class GraphGenerator:
                 self.logger.warning("matplotlib not installed — graphs skipped")
             return False
 
+    # Отрисовка линейного графика % по дням и сохранение в PNG.
     def _plot_unsuccessful_7d(
         self,
         points: List[Tuple[str, Optional[float]]],
@@ -46,8 +65,21 @@ class GraphGenerator:
         dpi: int = 150,
         no_data_label: str = "нет\nданных",
         ylabel: str = "% пустых",
-    ) -> Optional[Path]:
-        """Рисует линейный график % по дням и сохраняет в output_path."""
+        ) -> Optional[Path]:
+        """Рисует линейный график (дата → %) и сохраняет в output_path.
+
+        Args:
+            points: Список (метка_дня, значение_%) или (метка, None) для пропуска.
+            output_path: Путь к выходному PNG.
+            title: Заголовок графика.
+            figsize: Размер фигуры (ширина, высота) в дюймах.
+            dpi: Разрешение для сохранения.
+            no_data_label: Подпись для точек без данных.
+            ylabel: Подпись оси Y.
+
+        Returns:
+            Path к сохранённому файлу или None при ошибке.
+        """
         try:
             import matplotlib.pyplot as plt  # type: ignore
         except ImportError:
@@ -83,13 +115,14 @@ class GraphGenerator:
         plt.close(fig)
         return output_path
 
+    # График % пустых пролётов за 7 дней (все станции или по фильтру).
     def generate_overall_unsuccessful_7d(
         self,
         target_date: str,
         output_path: Path,
         days: int = 7,
         stations_filter: Optional[Set[str]] = None,
-    ) -> Optional[Path]:
+        ) -> Optional[Path]:
         """
         Генерирует PNG график процента пустых пролетов за последние N дней (все станции или по фильтру).
 
@@ -136,15 +169,24 @@ class GraphGenerator:
                 self.logger.warning(f"failed to generate 7d graph: {e}")
             return None
 
+    # График % не принятых коммерческих пролётов за 7 дней.
     def generate_comm_unsuccessful_7d(
         self,
         target_date: str,
         output_path: Path,
         days: int = 7,
         up_to_datetime: Optional[datetime] = None,
-    ) -> Optional[Path]:
-        """
-        Генерирует PNG график процента не принятых коммерческих пролётов за последние N дней.
+        ) -> Optional[Path]:
+        """Генерирует PNG график % не принятых коммерческих пролётов за N дней.
+
+        Args:
+            target_date: Дата в формате YYYYMMDD (конец периода).
+            output_path: Путь для сохранения PNG.
+            days: Количество дней (по умолчанию 7).
+            up_to_datetime: Для целевой даты — учитывать только пролёты до этого момента.
+
+        Returns:
+            Путь к сохранённому файлу или None при ошибке.
         """
         if not self._ensure_matplotlib():
             return None
@@ -180,13 +222,14 @@ class GraphGenerator:
                 self.logger.warning(f"failed to generate comm 7d graph: {e}")
             return None
 
+    # График % пустых пролётов за 7 дней по одной станции.
     def generate_station_unsuccessful_7d(
         self,
         station_name: str,
         target_date: str,
         output_path: Path,
         days: int = 7,
-    ) -> Optional[Path]:
+        ) -> Optional[Path]:
         """
         Генерирует PNG график процента пустых пролетов за последние N дней по одной станции.
 

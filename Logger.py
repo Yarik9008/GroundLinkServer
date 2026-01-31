@@ -5,15 +5,27 @@ import os
 
 
 class Logger:
-    '''Класс для ведения логов. Записи сохраняются в файл и дублируются в консоль.'''
+    """Обёртка для ведения логов: файл + консоль с цветами.
 
+    Использует стандартный logging и coloredlogs. Файл: path_log + logger_name-YYYY-MM-DD.log.
+
+    Методы:
+        __init__: Инициализация с путём, уровнем и именем.
+        debug, info, warning, error, critical: Логирование по уровням.
+        exception: Логирование исключения с трассировкой.
+
+    Атрибуты:
+        logs: Объект logging.Logger.
+    """
+
+    # Инициализация логгера с путём, уровнем и именем.
     def __init__(self, path_log, log_level='info', logger_name=None):
         """Инициализирует логгер.
 
         Args:
-            path_log: Базовый путь/префикс имени лог-файла.
-            log_level: Уровень логирования строкой (debug, info, warning, error, critical).
-            logger_name: Имя логгера; если не задано, используется имя модуля.
+            path_log: Базовый путь (с завершающим разделителем). Файл: path_log + logger_name-YYYY-MM-DD.log.
+            log_level: Уровень логирования (debug, info, warning, error, critical).
+            logger_name: Имя логгера для файла и консоли; если None — __name__.
         """
         
         # Соответствие строковых уровней и констант logging.
@@ -36,8 +48,8 @@ class Logger:
             if dir_path:
                 os.makedirs(dir_path, exist_ok=True)
 
-        # Имя лог-файла с меткой текущей даты и времени.
-        name = path_log + logger_name + '-' + '-'.join('-'.join('-'.join(str(datetime.now()).split()).split('.')).split(':')) + '.log'
+        # Имя лог-файла: путь + имя_логгера + дата (YYYY-MM-DD) + .log
+        name = path_log + logger_name + '-' + datetime.now().strftime("%Y-%m-%d") + '.log'
 
         # Обработчик для записи в файл.
         self.file = logging.FileHandler(name, encoding="utf-8")
@@ -64,26 +76,37 @@ class Logger:
         # Стартовое сообщение для проверки работы логгера.
         self.logs.info('Start logging')
 
+    # Логирование отладочного сообщения.
     def debug(self, message):
         """Логирует отладочное сообщение."""
         self.logs.debug(message)
 
+    # Логирование информационного сообщения.
     def info(self, message):
         """Логирует информационное сообщение."""
         self.logs.info(message)
 
+    # Логирование предупреждения.
     def warning(self, message):
         """Логирует предупреждение."""
         self.logs.warning(message)
 
+    # Логирование критической ошибки.
     def critical(self, message):
         """Логирует критическое сообщение."""
         self.logs.critical(message)
-    
+
+    # Логирование исключения с трассировкой стека.
     def exception(self, message, exc_info=None):
-        """Логирует исключение."""
+        """Логирует исключение с трассировкой стека.
+
+        Args:
+            message: Сообщение.
+            exc_info: Передать в logging.exception (None — авто-определение из текущего except).
+        """
         self.logs.exception(message, exc_info=exc_info)
 
+    # Логирование сообщения об ошибке.
     def error(self, message):
         """Логирует сообщение об ошибке."""
         self.logs.error(message)

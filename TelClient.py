@@ -1,56 +1,32 @@
-"""
-Клиент для получения и парсинга коммерческих пролётов из Telegram-канала.
-
-Перенесено из test/old_GroundLinkServer.py:
-  - запуск TelegramClient (telethon),
-  - итерация сообщений канала,
-  - парсинг текста (без записи в БД — сохранение делает вызывающий код).
-
-Использование
--------------
-1) Только парсинг текста (без Telegram):
-
-   from TelClient import TelClient
-
-   client = TelClient()
-   text = "MUR NOAA-20 2024-01-15 11:00:00 - 11:12:00"
-   passes = client.parse_passes(text)
-   # passes = [("R3.2S_Murmansk", "NOAA-20", "2024-01-15 11:00:00", "2024-01-15 11:12:00")]
-
-   # Сообщение с несколькими блоками (разделены \\n\\n):
-   passes = client.parse_message("блок1\n\nблок2")
-
-2) Синхронный запуск синхронизации из канала (нужны telethon и настройки):
-
-   client = TelClient(logger=..., config=config)
-   result = client.run_comm_passes_sync()
-   # result = (число_сообщений, число_пролётов) или None при ошибке
-
-3) Настройки: config["telegram"] или переменные окружения:
-   - TG_API_ID, TG_API_HASH — API Telegram
-   - TG_CHANNEL — ссылка на канал (https://t.me/...)
-   - TG_SESSION — путь к файлу сессии (по умолчанию telegram в каталоге скрипта)
-"""
-
 import asyncio
 import os
 import re
 import sqlite3
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
-
-try:
-    from telethon import TelegramClient  # type: ignore
-    TELETHON_AVAILABLE = True
-except ImportError:
-    TELETHON_AVAILABLE = False
-    TelegramClient = None  # type: ignore
+from telethon import TelegramClient
 
 # Алиасы станций по умолчанию (если в config нет telegram.station_aliases)
 DEFAULT_STATION_ALIASES: Dict[str, str] = {
     "MUR": "R3.2S_Murmansk",
     "ANA": "R4.6S_Anadyr",
 }
+
+# Алиасы спутников по умолчанию (если в config нет telegram.satellite_aliases)
+DEFAULT_SATELLITE_ALIASES: Dict[str, str] = {
+    "B01": "JL1KF02B01",
+    "B02": "JL1KF02B02",
+    "B03": "JL1KF02B03",
+    "B04": "JL1KF02B04",
+    "B05": "JL1KF02B05",
+    "B06": "JL1KF02B06",
+    "B07": "JL1KF02B07",
+    "TY-39": "TY-39",
+    "TY-40": "TY-40",
+    "TY-41": "TY-41",
+    "TY-42": "TY-42",
+}
+
 COMM_STATION_ALIASES = DEFAULT_STATION_ALIASES  # обратная совместимость
 
 # Регулярка для строки пролёта: станция спутник дата время_начала - время_окончания
@@ -67,23 +43,51 @@ ParsedPass = Tuple[str, str, str, str]
 
 
 class TelClient:
-    """
-    Получение и парсинг коммерческих пролётов из Telegram-канала.
+    """Клиент для чтения и парсинга коммерческих пролётов из Telegram-канала.
 
-    Настройки: config["telegram"] или переменные окружения TG_API_ID, TG_API_HASH,
-    TG_CHANNEL, TG_SESSION. Запись в БД не выполняется — только чтение и парсинг.
+    Настройки: config["telegram"] или TG_API_ID, TG_API_HASH, TG_CHANNEL, TG_SESSION.
+    Формат строки пролёта: станция спутник YYYY-MM-DD HH:MM:SS-HH:MM:SS.
+
+    Методы:
+        __init__: Инициализация с логгером и конфигом.
+        _get_settings: Чтение настроек Telegram.
+        _get_station_aliases, _get_satellite_aliases: Алиасы из config или defaults.
+        _log: Логирование через self.logger.
+        split_by_double_newline: Разбивка текста по \\n\\n.
+        parse_passes: Парсинг строк пролётов в списке.
+        parse_message: Парсинг сообщения (блоки по \\n\\n).
+        _start_telegram_client: Запуск TelegramClient (async).
+        iter_comm_messages: Итератор по сообщениям канала (async).
+        sync_comm_passes_once: Один проход синхронизации (async).
+        run_comm_passes_sync: Синхронная обёртка для main().
+
+    Атрибуты:
+        logger: Логгер.
+        config: Конфигурация приложения.
     """
 
+    # Инициализация клиента с логгером и конфигурацией.
     def __init__(
         self,
         logger: Optional[Any] = None,
         config: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        ) -> None:
+        """Инициализирует клиент.
+
+        Args:
+            logger: Логгер (опционально).
+            config: Конфигурация (config["telegram"] для настроек).
+        """
         self.logger = logger
         self.config = config or {}
 
+    # Чтение настроек Telegram из config и переменных окружения.
     def _get_settings(self) -> Dict[str, Any]:
-        """Читает настройки Telegram из config и env."""
+        """Читает настройки Telegram (api_id, api_hash, channel, session).
+
+        Returns:
+            dict с ключами api_id, api_hash, channel, session.
+        """
         tg = self.config.get("telegram") or {}
         base_dir = os.path.dirname(os.path.abspath(__file__))
         api_id_raw = tg.get("api_id") or os.getenv("TG_API_ID", "25004944")
@@ -101,18 +105,21 @@ class TelClient:
             "session": str(session),
         }
 
+    # Алиасы станций: config или DEFAULT_STATION_ALIASES.
     def _get_station_aliases(self) -> Dict[str, str]:
         """Алиасы станций из config.telegram.station_aliases или config.comm_station_aliases, иначе по умолчанию."""
         tg = self.config.get("telegram") or {}
         aliases = tg.get("station_aliases") or self.config.get("comm_station_aliases")
         return dict(aliases) if aliases else dict(DEFAULT_STATION_ALIASES)
 
+    # Алиасы спутников: config или DEFAULT_SATELLITE_ALIASES.
     def _get_satellite_aliases(self) -> Dict[str, str]:
-        """Алиасы спутников из config.telegram.satellite_aliases."""
+        """Алиасы спутников из config.telegram.satellite_aliases, иначе по умолчанию."""
         tg = self.config.get("telegram") or {}
         aliases = tg.get("satellite_aliases")
-        return dict(aliases) if aliases else {}
+        return dict(aliases) if aliases else dict(DEFAULT_SATELLITE_ALIASES)
 
+    # Логирование через self.logger (поддержка % и .format).
     def _log(self, level: str, msg: str, *args: Any, **kwargs: Any) -> None:
         if self.logger is None:
             return
@@ -124,12 +131,14 @@ class TelClient:
                 msg = msg + " " + " ".join(str(a) for a in args)
         getattr(self.logger, level, self.logger.info)(msg)
 
+    # Разбивка текста по двойному переносу строки.
     @staticmethod
     def split_by_double_newline(text: str) -> List[str]:
         """Делит текст по двойному переносу строки, возвращает непустые куски."""
         chunks = [part.strip() for part in text.split("\n\n")]
         return [part for part in chunks if part]
 
+    # Парсинг строк пролётов в списке (station, satellite, session_start, session_end).
     def parse_passes(self, text: str) -> List[ParsedPass]:
         """
         Парсит текст сообщения и возвращает список пролётов.
@@ -155,6 +164,7 @@ class TelClient:
             passes.append((station, satellite, session_start, session_end))
         return passes
 
+    # Парсинг сообщения: разбивка по \\n\\n и парсинг каждого блока.
     def parse_message(self, text: str) -> List[ParsedPass]:
         """
         Делит сообщение по двойному переносу, парсит каждый блок и возвращает
@@ -166,9 +176,10 @@ class TelClient:
             result.extend(self.parse_passes(part))
         return result
 
+    # Запуск TelegramClient (fallback на сессию с pid при database is locked).
     async def _start_telegram_client(self) -> Any:
         """Запускает TelegramClient. При database is locked использует сессию с суффиксом pid."""
-        if not TELETHON_AVAILABLE or TelegramClient is None:
+        if TelegramClient is None:
             raise RuntimeError("telethon не установлен. Установите: pip install telethon")
         settings = self._get_settings()
         if not settings["api_id"] or not settings["api_hash"]:
@@ -192,16 +203,17 @@ class TelClient:
             await client.start()
             return client
 
+    # Асинхронный итератор по сообщениям канала.
     async def iter_comm_messages(
         self,
         client: Optional[Any] = None,
-    ) -> AsyncIterator[Tuple[int, str, List[str], List[ParsedPass]]]:
+        ) -> AsyncIterator[Tuple[int, str, List[str], List[ParsedPass]]]:
         """
         Асинхронный генератор: для каждого сообщения канала выдаёт
         (индекс, текст, части по \\n\\n, список распарсенных пролётов).
         client можно не передавать — тогда создаётся и закрывается внутри.
         """
-        if not TELETHON_AVAILABLE:
+        if TelegramClient is None:
             raise RuntimeError("telethon не установлен. Установите: pip install telethon")
         settings = self._get_settings()
         if not settings["api_id"] or not settings["api_hash"] or not settings["channel"]:
@@ -221,12 +233,13 @@ class TelClient:
             if own_client and client is not None:
                 await client.disconnect()
 
+    # Один проход: чтение всех сообщений, парсинг, возврат (msgs, passes_count, passes_list).
     async def sync_comm_passes_once(self) -> Tuple[int, int, List[ParsedPass]]:
         """
         Один проход: читает все сообщения канала, парсит и возвращает
         (число сообщений, число распарсенных пролётов, список пролётов). БД не используется.
         """
-        if not TELETHON_AVAILABLE:
+        if TelegramClient is None:
             raise RuntimeError("telethon не установлен. Установите: pip install telethon")
         settings = self._get_settings()
         if not settings["api_id"] or not settings["api_hash"] or not settings["channel"]:
@@ -240,12 +253,13 @@ class TelClient:
         self._log("info", "Синхронизация завершена: сообщений=%s, пролётов=%s", total_msgs, len(all_passes))
         return total_msgs, len(all_passes), all_passes
 
+    # Синхронная обёртка: asyncio.run(sync_comm_passes_once).
     def run_comm_passes_sync(self) -> Optional[Tuple[int, int, List[ParsedPass]]]:
         """
         Синхронная обёртка: запускает sync_comm_passes_once() в asyncio.
         Возвращает (total_msgs, total_passes, список пролётов) или None при ошибке/отключении.
         """
-        if not TELETHON_AVAILABLE:
+        if TelegramClient is None:
             self._log("warning", "telethon не установлен, синхронизация Telegram отключена")
             return None
         settings = self._get_settings()
@@ -273,6 +287,7 @@ if __name__ == "__main__":
     # Чтобы видеть причину ошибки при запуске из консоли
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     _logger = logging.getLogger("TelClient")
+
     # Загружаем config.json из каталога скрипта (рядом с TelClient.py), затем из текущего каталога
     script_dir = Path(__file__).resolve().parent
     config_paths = [

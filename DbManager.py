@@ -339,6 +339,7 @@ class DbManager:
             conn.rollback()
             raise
 
+    # Добавляет несколько пролетов за одну транзакцию.
     def add_passes_batch(self, sat_passes: Iterable[SatPas]) -> int:
         """Добавляет несколько пролетов за одну транзакцию."""
         conn = self._connect()
@@ -626,7 +627,8 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
-    ) -> int:
+        ) -> int:
+
         """Возвращает число коммерческих пролётов за день.
 
         Если задан up_to_datetime (UTC), считаются только пролёты с rx_start_time <= этого момента
@@ -658,7 +660,7 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
-    ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+        ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
         """Возвращает (stats, totals) для блока «Коммерческие пролеты» в письме.
 
         stats = {station_name: {"planned": N, "successful": N, "not_received": N}}
@@ -745,7 +747,7 @@ class DbManager:
         self,
         start_day: date | datetime | str,
         end_day: date | datetime | str,
-    ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+        ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
         """Возвращает (stats, totals) за период дат.
 
         stats = {station_name: {"planned": N, "successful": N, "not_received": N}}
@@ -803,7 +805,7 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
-    ) -> int:
+        ) -> int:
         """Возвращает число коммерческих пролётов за день, по которым есть успешный приём в all_passes.
 
         Сопоставление: станция + спутник + дата. Если задан up_to_datetime (UTC), считаются только
@@ -847,7 +849,7 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
-    ) -> List[Tuple[str, str, str, str, str]]:
+        ) -> List[Tuple[str, str, str, str, str]]:
         """Возвращает список (station_name, satellite_name, rx_start_time, rx_end_time, graph_url) для пролётов без приёма.
         graph_url — ссылка на график из all_passes (success=0), если есть; иначе пустая строка.
         """
@@ -903,7 +905,7 @@ class DbManager:
         self,
         start_day: date | datetime | str,
         end_day: date | datetime | str,
-    ) -> List[Tuple[str, str, str, str, str]]:
+        ) -> List[Tuple[str, str, str, str, str]]:
         """Возвращает список (station_name, satellite_name, rx_start_time, rx_end_time, graph_url) за период."""
         start_value = self._normalize_date(start_day)
         end_value = self._normalize_date(end_day)
@@ -997,7 +999,7 @@ class DbManager:
         self,
         start_day: date | datetime | str,
         end_day: date | datetime | str,
-    ) -> list[list]:
+        ) -> list[list]:
         """Возвращает статистику по станциям за диапазон дат (средний SNR по всем логам)."""
         start_value = self._normalize_date(start_day)
         end_value = self._normalize_date(end_day)
@@ -1114,7 +1116,6 @@ class DbManager:
         for station_name, graph_url in rows:
             result.setdefault(station_name, []).append(graph_url)
         return result
-
 
 
 if __name__ == "__main__":
