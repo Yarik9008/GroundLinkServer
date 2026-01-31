@@ -1,6 +1,7 @@
-# GroundLinkMonitorServer
+# GroundLinkServer
 
 Сервер мониторинга наземных станций приёма спутниковых пролётов: загрузка логов с портала EUS, анализ пролётов, учёт коммерческих пролётов из Telegram, формирование отчётов и отправка сводки по email.
+Консольный вывод: за день (все пролёты → коммерческие), затем за 7 дней (все → коммерческие).
 
 ## Возможности
 
@@ -34,8 +35,8 @@
 - Python 3.10+
 - **aiohttp** — асинхронная загрузка с EUS.
 - **beautifulsoup4** — разбор HTML портала.
-- **telethon** — Telegram API (для синхронизации коммерческих пролётов).
-- **matplotlib** — построение графиков.
+- **telethon** — Telegram API (для синхронизации коммерческих пролётов; можно не ставить, если Telegram не используется).
+- **matplotlib** — построение графиков (опционально, если нужны PNG).
 - **colorama** — цветной вывод в консоль (опционально).
 
 Установка (пример):
@@ -44,12 +45,27 @@
 pip install aiohttp beautifulsoup4 telethon matplotlib colorama
 ```
 
+### Быстрый старт
+
+```bash
+# Запуск за текущий день (UTC)
+python GroundLinkServer.py
+
+# Диапазон дат без email
+python GroundLinkServer.py 20260101 20260115 --off-email
+```
+
 ## Конфигурация (`config.json`)
 
-- **telegram** — `api_id`, `api_hash`, `channel`, `session`; `station_aliases`, `satellite_aliases` для маппинга коротких имён из сообщений в имена станций/спутников в системе.
+- **telegram** — `api_id`, `api_hash`, `channel`, `session`; `station_aliases`, `satellite_aliases` для маппинга коротких имён из сообщений в имена станций/спутников в системе (есть дефолтные алиасы).
 - **report_dir** — каталог для графиков (например, `report`).
 - **email** — `enabled`, SMTP-параметры, отправитель, получатели, тема, `attach_report`, `debug_recipient`.
 - **stations_for_email** — список станций, по которым включать блок в письме и строить графики.
+
+## Логи
+
+- Логи сервера пишутся в `server_logs/`.
+- Имена файлов логов содержат только дату: `MAIN-YYYY-MM-DD.log`, `DB-YYYY-MM-DD.log` и т.д.
 
 ## Запуск
 
@@ -57,10 +73,15 @@ pip install aiohttp beautifulsoup4 telethon matplotlib colorama
 python GroundLinkServer.py [start_date] [end_date] [--sch] [--off-email] [--debag-email]
 ```
 
-- **start_date**, **end_date** — даты в формате `YYYYMMDD`. Если не указаны — обрабатывается только текущий день (UTC).
-- **--sch** — режим по расписанию: ожидание до 00:00 UTC, затем один прогон за текущий день (удобно для cron).
-- **--off-email** — не отправлять email.
+Описание аргументов и флагов:
+
+- **start_date** — дата начала в формате `YYYYMMDD` (опционально).
+- **end_date** — дата конца в формате `YYYYMMDD` (опционально).
+- **--sch** — режим по расписанию: ожидание до 00:00 UTC, затем один прогон за предыдущий день.
+- **--off-email** — отключить отправку email.
 - **--debag-email** — отладочная отправка: письмо уходит только на `debug_recipient` из конфига.
+
+Если даты не указаны, обрабатывается только текущий день (UTC).
 
 Примеры:
 
@@ -86,6 +107,23 @@ sudo cp /root/lorett/GroundLinkServer/groundlinkserver.service /etc/systemd/syst
 sudo systemctl daemon-reload
 sudo systemctl enable groundlinkserver.service
 sudo systemctl start groundlinkserver.service
+```
+
+Команды управления сервисом:
+
+```bash
+# Старт
+sudo systemctl start groundlinkserver.service
+```
+
+```bash
+# Остановка
+sudo systemctl stop groundlinkserver.service
+```
+
+```bash
+# Перезапуск
+sudo systemctl restart groundlinkserver.service
 ```
 
 Проверка статуса и логи:

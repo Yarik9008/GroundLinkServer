@@ -1,0 +1,6 @@
+aiohttp==3.13.3
+beautifulsoup4==4.14.3
+telethon==1.42.0
+matplotlib==3.10.8
+colorama==0.4.6
+coloredlogs==15.0.1
