@@ -4,7 +4,10 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
-from telethon import TelegramClient
+try:
+    from telethon import TelegramClient  # type: ignore
+except Exception:  # telethon is optional
+    TelegramClient = None  # type: ignore[assignment]
 
 # Алиасы станций по умолчанию (если в config нет telegram.station_aliases)
 DEFAULT_STATION_ALIASES: Dict[str, str] = {
@@ -38,8 +41,9 @@ COMM_PASS_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Тип: (station, satellite, session_start, session_end)
-ParsedPass = Tuple[str, str, str, str]
+# Тип: (station, satellite, session_start, session_end, pass_type, comment)
+# pass_type: "коммерческий" | "тестовый коммерческий"
+ParsedPass = Tuple[str, str, str, str, str, str]
 
 
 class TelClient:
@@ -139,12 +143,13 @@ class TelClient:
         return [part for part in chunks if part]
 
     # Парсинг строк пролётов в списке (station, satellite, session_start, session_end).
-    def parse_passes(self, text: str) -> List[ParsedPass]:
+    def parse_passes(self, text: str, *, default_pass_type: str = "коммерческий") -> List[ParsedPass]:
         """
         Парсит текст сообщения и возвращает список пролётов.
-        Каждый элемент — (station, satellite, session_start, session_end).
+        Каждый элемент — (station, satellite, session_start, session_end, pass_type, comment).
         """
         passes: List[ParsedPass] = []
+        test_re = re.compile(r"\b(тест|test)\w*\b", re.IGNORECASE)
         for line in text.splitlines():
             line = line.strip()
             if not line:
@@ -152,6 +157,10 @@ class TelClient:
             match = COMM_PASS_LINE_RE.match(line)
             if not match:
                 continue
+            tail = line[match.end():].strip()
+            is_test = bool(test_re.search(tail)) or bool(test_re.search(line))
+            pass_type = "тестовый коммерческий" if is_test else default_pass_type
+            comment = tail
             station = match.group("station")
             station = self._get_station_aliases().get(station, station)
             satellite = match.group("satellite")
@@ -161,7 +170,7 @@ class TelClient:
             end_time = match.group("end")
             session_start = f"{date} {start_time}"
             session_end = f"{date} {end_time}"
-            passes.append((station, satellite, session_start, session_end))
+            passes.append((station, satellite, session_start, session_end, pass_type, comment))
         return passes
 
     # Парсинг сообщения: разбивка по \\n\\n и парсинг каждого блока.
@@ -173,7 +182,10 @@ class TelClient:
         parts = self.split_by_double_newline(text)
         result: List[ParsedPass] = []
         for part in parts:
-            result.extend(self.parse_passes(part))
+            # Если в блоке есть "тест"/"test", считаем пролёты тестовыми по умолчанию
+            is_test_block = bool(re.search(r"\b(тест|test)\w*\b", part, flags=re.IGNORECASE))
+            default_type = "тестовый коммерческий" if is_test_block else "коммерческий"
+            result.extend(self.parse_passes(part, default_pass_type=default_type))
         return result
 
     # Запуск TelegramClient (fallback на сессию с pid при database is locked).
@@ -309,8 +321,10 @@ if __name__ == "__main__":
         print(f"Синхронизация: сообщений={total_msgs}, пролётов={total_passes}")
         if passes_list:
             print("\nСписок пролётов:")
-            for station, satellite, session_start, session_end in passes_list:
-                print(f"  {station}  {satellite}  {session_start} — {session_end}")
+            for station, satellite, session_start, session_end, pass_type, comment in passes_list:
+                suffix = f" [{pass_type}]" if pass_type else ""
+                comment_s = f" ({comment})" if comment else ""
+                print(f"  {station}  {satellite}  {session_start} — {session_end}{suffix}{comment_s}")
     else:
         tg = config.get("telegram") or {}
         has_telegram = bool(tg.get("api_id") and tg.get("api_hash") and tg.get("channel"))

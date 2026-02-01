@@ -12,7 +12,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 from Logger import Logger
 from GraphGenerator import GraphGenerator
 from EusLogDownloader import EusLogDownloader
@@ -317,8 +317,28 @@ class GroundLinkServer:
             day: Дата.
             up_to_datetime: Для «сегодня» — учитывать только пролёты до этого момента.
         """
-        stats, totals = self.db_manager.get_commercial_passes_stats_by_station(day, up_to_datetime)
-        if not stats and totals["planned"] == 0:
+        now_utc = datetime.now(timezone.utc)
+        # Если считаем статистику за сегодня/будущий день — исключаем пролёты из будущего (rx_start_time > now_utc).
+        if up_to_datetime is None:
+            try:
+                day_date = day.date() if isinstance(day, datetime) else day
+            except Exception:
+                day_date = day
+            if hasattr(day_date, "isoformat") and str(day_date) >= str(now_utc.date()):
+                up_to_datetime = now_utc
+
+        stats_comm, totals_comm = self.db_manager.get_commercial_passes_stats_by_station(
+            day, up_to_datetime, pass_type="коммерческий"
+        )
+        stats_test, totals_test = self.db_manager.get_commercial_passes_stats_by_station(
+            day, up_to_datetime, pass_type="тестовый коммерческий"
+        )
+        totals = {
+            "planned": int(totals_comm.get("planned", 0) or 0) + int(totals_test.get("planned", 0) or 0),
+            "successful": int(totals_comm.get("successful", 0) or 0) + int(totals_test.get("successful", 0) or 0),
+            "not_received": int(totals_comm.get("not_received", 0) or 0) + int(totals_test.get("not_received", 0) or 0),
+        }
+        if (not stats_comm and not stats_test) and totals["planned"] == 0:
             return None
         if isinstance(day, datetime):
             date_display = day.date().isoformat()
@@ -326,11 +346,21 @@ class GroundLinkServer:
             date_display = day.isoformat()
         else:
             date_display = str(day)
+        # Таблица агрегирована по станции (тип показываем только в списке непринятых).
+        by_station: Dict[str, Dict[str, int]] = {}
+        for stats in (stats_comm or {}, stats_test or {}):
+            for station_name, s in stats.items():
+                st = str(station_name)
+                if st not in by_station:
+                    by_station[st] = {"planned": 0, "successful": 0, "not_received": 0}
+                by_station[st]["planned"] += int(s.get("planned", 0) or 0)
+                by_station[st]["successful"] += int(s.get("successful", 0) or 0)
+                by_station[st]["not_received"] += int(s.get("not_received", 0) or 0)
         rows = []
-        for station_name, s in stats.items():
-            planned = s["planned"]
-            successful = s["successful"]
-            not_received = s["not_received"]
+        for station_name, s in by_station.items():
+            planned = int(s.get("planned", 0) or 0)
+            successful = int(s.get("successful", 0) or 0)
+            not_received = int(s.get("not_received", 0) or 0)
             pct = (not_received * 100.0 / planned) if planned else 0.0
             rows.append((station_name, planned, successful, not_received, pct))
         total_pct = (totals["not_received"] * 100.0 / totals["planned"]) if totals["planned"] else 0.0
@@ -379,18 +409,44 @@ class GroundLinkServer:
         not_received_list = stats.get("not_received_list") or []
         if not_received_list:
             print(f"\n{Fore.BLUE + Style.BRIGHT}НЕ ПРИНЯТЫЕ КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА ДЕНЬ")
-            for station_name, satellite_name, rx_start, rx_end, graph_url in not_received_list:
+            for item in not_received_list:
+                # (station, pass_type, satellite, rx_start, rx_end, graph_url) — pass_type может отсутствовать в старой БД
+                if len(item) >= 6:
+                    station_name, pass_type, satellite_name, rx_start, rx_end, graph_url = item[:6]
+                else:
+                    station_name, satellite_name, rx_start, rx_end, graph_url = item[:5]
+                    pass_type = "коммерческий"
+                type_label = "тестовый" if "тест" in str(pass_type).lower() else "коммерческий"
                 time_str = f"{rx_start} — {rx_end}" if rx_end else rx_start
-                line = f"  {Fore.BLUE}{station_name} | {satellite_name} | {time_str}"
+                line = f"  {Fore.BLUE}{station_name} | {type_label} | {satellite_name} | {time_str}"
                 if graph_url:
                     line += f" | {graph_url}"
                 print(line)
 
     # Сбор статистики коммерческих пролётов за период.
-    def build_comm_period_stats(self, start_day, end_day) -> dict:
+    def build_comm_period_stats(self, start_day, end_day, up_to_datetime: Optional[datetime] = None) -> dict:
         """Собирает статистику коммерческих пролётов за период."""
-        stats, totals = self.db_manager.get_commercial_passes_stats_by_station_range(start_day, end_day)
-        if not stats and totals["planned"] == 0:
+        now_utc = datetime.now(timezone.utc)
+        # Если период включает сегодня/будущее — исключаем пролёты из будущего (rx_start_time > now_utc).
+        if up_to_datetime is None:
+            try:
+                end_date = end_day.date() if isinstance(end_day, datetime) else end_day
+            except Exception:
+                end_date = end_day
+            if hasattr(end_date, "isoformat") and str(end_date) >= str(now_utc.date()):
+                up_to_datetime = now_utc
+        stats_comm, totals_comm = self.db_manager.get_commercial_passes_stats_by_station_range(
+            start_day, end_day, up_to_datetime=up_to_datetime, pass_type="коммерческий"
+        )
+        stats_test, totals_test = self.db_manager.get_commercial_passes_stats_by_station_range(
+            start_day, end_day, up_to_datetime=up_to_datetime, pass_type="тестовый коммерческий"
+        )
+        totals = {
+            "planned": int(totals_comm.get("planned", 0) or 0) + int(totals_test.get("planned", 0) or 0),
+            "successful": int(totals_comm.get("successful", 0) or 0) + int(totals_test.get("successful", 0) or 0),
+            "not_received": int(totals_comm.get("not_received", 0) or 0) + int(totals_test.get("not_received", 0) or 0),
+        }
+        if (not stats_comm and not stats_test) and totals["planned"] == 0:
             return {}
         if isinstance(start_day, datetime):
             start_display = start_day.date().isoformat()
@@ -404,15 +460,27 @@ class GroundLinkServer:
             end_display = end_day.isoformat()
         else:
             end_display = str(end_day)
+        # Таблица агрегирована по станции (тип показываем только в списке непринятых).
+        by_station: Dict[str, Dict[str, int]] = {}
+        for stats in (stats_comm or {}, stats_test or {}):
+            for station_name, s in stats.items():
+                st = str(station_name)
+                if st not in by_station:
+                    by_station[st] = {"planned": 0, "successful": 0, "not_received": 0}
+                by_station[st]["planned"] += int(s.get("planned", 0) or 0)
+                by_station[st]["successful"] += int(s.get("successful", 0) or 0)
+                by_station[st]["not_received"] += int(s.get("not_received", 0) or 0)
         rows = []
-        for station_name, s in stats.items():
-            planned = s["planned"]
-            successful = s["successful"]
-            not_received = s["not_received"]
+        for station_name, s in by_station.items():
+            planned = int(s.get("planned", 0) or 0)
+            successful = int(s.get("successful", 0) or 0)
+            not_received = int(s.get("not_received", 0) or 0)
             pct = (not_received * 100.0 / planned) if planned else 0.0
             rows.append((station_name, planned, successful, not_received, pct))
         total_pct = (totals["not_received"] * 100.0 / totals["planned"]) if totals["planned"] else 0.0
-        not_received_list = self.db_manager.get_commercial_passes_not_received_list_range(start_day, end_day)
+        not_received_list = self.db_manager.get_commercial_passes_not_received_list_range(
+            start_day, end_day, up_to_datetime=up_to_datetime
+        )
         return {
             "period_display": f"{start_display} — {end_display}",
             "rows": rows,
@@ -457,32 +525,38 @@ class GroundLinkServer:
         not_received_list = stats.get("not_received_list") or []
         if not_received_list:
             print(f"\n{Fore.BLUE + Style.BRIGHT}НЕ ПРИНЯТЫЕ КОММЕРЧЕСКИЕ ПРОЛЁТЫ")
-            for station_name, satellite_name, rx_start, rx_end, graph_url in not_received_list:
+            for item in not_received_list:
+                if len(item) >= 6:
+                    station_name, pass_type, satellite_name, rx_start, rx_end, graph_url = item[:6]
+                else:
+                    station_name, satellite_name, rx_start, rx_end, graph_url = item[:5]
+                    pass_type = "коммерческий"
+                type_label = "тестовый" if "тест" in str(pass_type).lower() else "коммерческий"
                 time_str = f"{rx_start} — {rx_end}" if rx_end else rx_start
-                line = f"  {Fore.BLUE}{station_name} | {satellite_name} | {time_str}"
+                line = f"  {Fore.BLUE}{station_name} | {type_label} | {satellite_name} | {time_str}"
                 if graph_url:
                     line += f" | {graph_url}"
                 print(line)
 
     # Сбор статистики коммерческих пролётов за 7 дней.
-    def build_comm_week_stats(self, end_day) -> dict:
+    def build_comm_week_stats(self, end_day, up_to_datetime: Optional[datetime] = None) -> dict:
         """Собирает статистику коммерческих пролётов за 7 дней."""
         if isinstance(end_day, datetime):
             end_day = end_day.date()
         start_day = end_day - timedelta(days=6)
-        return self.build_comm_period_stats(start_day, end_day)
+        return self.build_comm_period_stats(start_day, end_day, up_to_datetime=up_to_datetime)
 
     # Вывод статистики коммерческих пролётов за неделю.
     def print_comm_week_stats(self, stats) -> None:
         self.print_comm_period_stats(stats, "КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА НЕДЕЛЮ")
 
     # Сбор статистики коммерческих пролётов за месяц.
-    def build_comm_month_stats(self, end_day) -> dict:
+    def build_comm_month_stats(self, end_day, up_to_datetime: Optional[datetime] = None) -> dict:
         """Собирает статистику коммерческих пролётов за месяц."""
         if isinstance(end_day, datetime):
             end_day = end_day.date()
         start_day = end_day.replace(day=1)
-        return self.build_comm_period_stats(start_day, end_day)
+        return self.build_comm_period_stats(start_day, end_day, up_to_datetime=up_to_datetime)
 
     # Вывод статистики коммерческих пролётов за месяц.
     def print_comm_month_stats(self, stats) -> None:
@@ -495,6 +569,8 @@ class GroundLinkServer:
         end_day=None,
         email: bool = False,
         debug_email: bool = False,
+        weekly_email_to_all: bool = False,
+        weekly_email_to_debug: bool = False,
         ):
         """Основной цикл: sync Telegram → backfill → загрузка логов → статистика → email.
 
@@ -503,6 +579,8 @@ class GroundLinkServer:
             end_day: Дата конца (если None — равно start_day).
             email: Включить отправку email-сводки.
             debug_email: Отладочная отправка (только на debug_recipient).
+            weekly_email_to_all: Отправить weekly-сводку на все адреса (To+Cc), игнорируя debug.
+            weekly_email_to_debug: Отправить weekly-сводку только на debug_recipient.
         """
         if start_day is None and end_day is None:
             start_day = datetime.now(timezone.utc).date()
@@ -567,7 +645,8 @@ class GroundLinkServer:
             # Статистика за 7 дней (все пролёты, затем коммерческие)
             week_stats = self.build_week_pass_stats(current_day)
             self.print_log_week_stats(week_stats)
-            comm_week_stats = self.build_comm_week_stats(current_day)
+            comm_week_up_to = now_utc if current_day >= now_utc.date() else None
+            comm_week_stats = self.build_comm_week_stats(current_day, up_to_datetime=comm_week_up_to)
             self.print_comm_week_stats(comm_week_stats)
 
             if daily_stats and (email or debug_email):
@@ -667,9 +746,38 @@ class GroundLinkServer:
                 elif debug_email and not debug_recipient:
                     self.logger.warning("debug email enabled but EMAIL_DEBUG_RECIPIENT is not set")
                 else:
-                    comm_stats, comm_totals = self.db_manager.get_commercial_passes_stats_by_station(
-                        current_day, up_to_datetime=now_utc
+                    comm_stats_comm, comm_totals_comm = self.db_manager.get_commercial_passes_stats_by_station(
+                        current_day, up_to_datetime=now_utc, pass_type="коммерческий"
                     )
+                    comm_stats_test, comm_totals_test = self.db_manager.get_commercial_passes_stats_by_station(
+                        current_day, up_to_datetime=now_utc, pass_type="тестовый коммерческий"
+                    )
+                    comm_rows_typed = []
+                    for station_name, s in (comm_stats_comm or {}).items():
+                        comm_rows_typed.append(
+                            (
+                                str(station_name),
+                                "коммерческий",
+                                int(s.get("planned", 0) or 0),
+                                int(s.get("successful", 0) or 0),
+                                int(s.get("not_received", 0) or 0),
+                            )
+                        )
+                    for station_name, s in (comm_stats_test or {}).items():
+                        comm_rows_typed.append(
+                            (
+                                str(station_name),
+                                "тестовый",
+                                int(s.get("planned", 0) or 0),
+                                int(s.get("successful", 0) or 0),
+                                int(s.get("not_received", 0) or 0),
+                            )
+                        )
+                    comm_totals = {
+                        "planned": int(comm_totals_comm.get("planned", 0) or 0) + int(comm_totals_test.get("planned", 0) or 0),
+                        "successful": int(comm_totals_comm.get("successful", 0) or 0) + int(comm_totals_test.get("successful", 0) or 0),
+                        "not_received": int(comm_totals_comm.get("not_received", 0) or 0) + int(comm_totals_test.get("not_received", 0) or 0),
+                    }
                     comm_7d_path = graphs_dir / "comm_unsuccessful_7d.png"
                     generated_comm_7d = self.graph_generator.generate_comm_unsuccessful_7d(
                         target_date, comm_7d_path, days=7, up_to_datetime=now_utc
@@ -685,8 +793,8 @@ class GroundLinkServer:
                         all_results,
                         graphs_dir=graphs_dir,
                         summary_7d_chart_path=summary_7d_chart_path,
-                        comm_stats=comm_stats,
                         comm_totals=comm_totals,
+                        comm_rows_typed=comm_rows_typed,
                         comm_summary_7d_chart_path=comm_summary_7d_chart_path,
                         comm_not_received_list=comm_not_received_list,
                     )
@@ -706,6 +814,145 @@ class GroundLinkServer:
                         self.logger.info(f"email sent for {target_date}")
                     else:
                         self.logger.warning(f"email failed for {target_date}")
+
+            # Дополнительное еженедельное письмо со статистикой за последние 7 дней:
+            # отправляется по воскресеньям (UTC) один раз за запуск, даже если за день нет данных.
+            # Управление получателями weekly-письма отдельными флагами (all/debug).
+            if email or debug_email or weekly_email_to_all or weekly_email_to_debug:
+                today_utc = datetime.now(timezone.utc).date()
+                if today_utc.weekday() == 6 and current_day == end_day:
+                    week_end = current_day
+                    week_start = week_end - timedelta(days=6)
+                    target_date = current_day.strftime("%Y%m%d")
+
+                    stations_filter = self.config.get("stations_for_email") or []
+                    if isinstance(stations_filter, list):
+                        stations_set = {s.strip() for s in stations_filter if s}
+                    else:
+                        stations_set = set()
+
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    report_dir = Path(self.config.get("report_dir") or os.path.join(base_dir, "report"))
+                    year = current_day.strftime("%Y")
+                    month = current_day.strftime("%m")
+                    day = current_day.strftime("%d")
+                    graphs_dir = report_dir / year / month / day
+                    graphs_dir.mkdir(parents=True, exist_ok=True)
+
+                    summary_7d_path = graphs_dir / "overall_unsuccessful_7d.png"
+                    generated_7d = self.graph_generator.generate_overall_unsuccessful_7d(
+                        target_date,
+                        summary_7d_path,
+                        days=7,
+                        stations_filter=stations_set if stations_set else None,
+                    )
+                    summary_7d_chart_path = (
+                        generated_7d if generated_7d and generated_7d.exists() else None
+                    )
+
+                    now_utc = datetime.now(timezone.utc)
+                    comm_7d_path = graphs_dir / "comm_unsuccessful_7d.png"
+                    generated_comm_7d = self.graph_generator.generate_comm_unsuccessful_7d(
+                        target_date, comm_7d_path, days=7, up_to_datetime=now_utc
+                    )
+                    comm_summary_7d_chart_path = (
+                        generated_comm_7d if generated_comm_7d and generated_comm_7d.exists() else None
+                    )
+
+                    email_cfg = (self.config or {}).get("email") or {}
+                    if weekly_email_to_debug:
+                        debug_recipient = email_cfg.get("debug_recipient")
+                    elif weekly_email_to_all:
+                        debug_recipient = None
+                    else:
+                        debug_recipient = email_cfg.get("debug_recipient") if debug_email else None
+                    settings = self.email_client.get_email_settings(debug_recipient=debug_recipient)
+                    if not settings.get("enabled"):
+                        self.logger.info("weekly email: disabled by settings")
+                    elif (weekly_email_to_debug or debug_email) and not debug_recipient:
+                        self.logger.warning("weekly email: debug enabled but EMAIL_DEBUG_RECIPIENT is not set")
+                    else:
+                        weekly_rows = self.db_manager.get_range_station_stats(week_start, week_end)
+                        weekly_results: Dict[str, Dict[str, Any]] = {}
+                        for station_name, total, success, failed, _, snr_awg in weekly_rows:
+                            if stations_set and station_name not in stations_set:
+                                continue
+                            weekly_results[str(station_name)] = {
+                                "files": int(total or 0),
+                                "total_files": int(total or 0),
+                                "successful_passes": int(success or 0),
+                                "unsuccessful_passes": int(failed or 0),
+                                "avg_snr": float(snr_awg or 0.0),
+                                "max_snr_filename": "",
+                                "unsuccessful_filenames": [],
+                            }
+
+                        # График % пустых за 7 дней по каждой станции для weekly-письма
+                        for station_name in weekly_results:
+                            station_7d_path = graphs_dir / station_name / "unsuccessful_7d.png"
+                            generated_station_7d = self.graph_generator.generate_station_unsuccessful_7d(
+                                station_name, target_date, station_7d_path, days=7
+                            )
+                            if generated_station_7d and generated_station_7d.exists():
+                                weekly_results[station_name]["station_7d_chart_path"] = str(generated_station_7d)
+
+                        comm_stats_week_comm, comm_totals_week_comm = (
+                            self.db_manager.get_commercial_passes_stats_by_station_range(
+                                week_start, week_end, up_to_datetime=now_utc, pass_type="коммерческий"
+                            )
+                        )
+                        comm_stats_week_test, comm_totals_week_test = (
+                            self.db_manager.get_commercial_passes_stats_by_station_range(
+                                week_start, week_end, up_to_datetime=now_utc, pass_type="тестовый коммерческий"
+                            )
+                        )
+                        comm_rows_week_typed = []
+                        for station_name, s in (comm_stats_week_comm or {}).items():
+                            comm_rows_week_typed.append(
+                                (
+                                    str(station_name),
+                                    "коммерческий",
+                                    int(s.get("planned", 0) or 0),
+                                    int(s.get("successful", 0) or 0),
+                                    int(s.get("not_received", 0) or 0),
+                                )
+                            )
+                        for station_name, s in (comm_stats_week_test or {}).items():
+                            comm_rows_week_typed.append(
+                                (
+                                    str(station_name),
+                                    "тестовый",
+                                    int(s.get("planned", 0) or 0),
+                                    int(s.get("successful", 0) or 0),
+                                    int(s.get("not_received", 0) or 0),
+                                )
+                            )
+                        comm_totals_week = {
+                            "planned": int(comm_totals_week_comm.get("planned", 0) or 0) + int(comm_totals_week_test.get("planned", 0) or 0),
+                            "successful": int(comm_totals_week_comm.get("successful", 0) or 0) + int(comm_totals_week_test.get("successful", 0) or 0),
+                            "not_received": int(comm_totals_week_comm.get("not_received", 0) or 0) + int(comm_totals_week_test.get("not_received", 0) or 0),
+                        }
+                        comm_not_received_week = (
+                            self.db_manager.get_commercial_passes_not_received_list_range(
+                                week_start, week_end, up_to_datetime=now_utc
+                            )
+                        )
+
+                        sent_week = self.email_client.send_weekly_stats_email(
+                            settings=settings,
+                            target_date=target_date,
+                            week_start=week_start,
+                            week_end=week_end,
+                            weekly_results=weekly_results,
+                            graphs_dir=graphs_dir,
+                            summary_7d_chart_path=summary_7d_chart_path,
+                            comm_totals=comm_totals_week,
+                            comm_rows_typed=comm_rows_week_typed,
+                            comm_summary_7d_chart_path=comm_summary_7d_chart_path,
+                            comm_not_received_list=comm_not_received_week,
+                        )
+                        if sent_week:
+                            self.logger.info(f"weekly email sent for {week_start}..{week_end}")
             current_day += timedelta(days=1)
 
     # Загрузка логов EUS, анализ пролётов и запись в БД.
@@ -796,6 +1043,17 @@ if __name__ == "__main__":
     parser.add_argument("--sch", action="store_true", help="Запуск в 00:00 UTC по расписанию")
     parser.add_argument("--off-email", action="store_true", help="Отключить отправку email")
     parser.add_argument("--debag-email", action="store_true", help="Отладочная отправка email")
+    weekly_group = parser.add_mutually_exclusive_group()
+    weekly_group.add_argument(
+        "--weekly-email-all",
+        action="store_true",
+        help="Weekly-сводка в воскресенье: отправить на все адреса (To+Cc)",
+    )
+    weekly_group.add_argument(
+        "--weekly-email-debug",
+        action="store_true",
+        help="Weekly-сводка в воскресенье: отправить только на debug_recipient",
+    )
     args = parser.parse_args()
 
     # функция для парсинга даты в формате YYYYMMDD
@@ -826,6 +1084,10 @@ if __name__ == "__main__":
             )
 
             # Ждём до следующей полночи UTC, логируя остаток каждый час (в часах и секундах).
+            # Если на следующем запуске будет отправляться weekly-письмо (отчётный день = воскресенье),
+            # логируем это также раз в час до отправки.
+            next_run_day = next_midnight.date() - timedelta(days=1)
+            will_send_weekly = next_run_day.weekday() == 6  # Sunday (UTC)
             while True:
                 now = datetime.now(timezone.utc)
                 remaining = (next_midnight - now).total_seconds()
@@ -834,6 +1096,8 @@ if __name__ == "__main__":
                 hours = int(remaining // 3600)
                 seconds = int(remaining % 3600)
                 server.logger.info(f"time until UTC midnight: {hours}h {seconds}s")
+                if will_send_weekly:
+                    server.logger.info(f"time until weekly email send: {hours}h {seconds}s")
                 time.sleep(min(3600, remaining))
 
             # небольшой буфер, чтобы точно перейти за границу дня
@@ -848,6 +1112,8 @@ if __name__ == "__main__":
                 end_day=run_day,
                 email=not args.off_email,
                 debug_email=args.debag_email,
+                weekly_email_to_all=args.weekly_email_all,
+                weekly_email_to_debug=args.weekly_email_debug,
             )
 
     else:
@@ -857,4 +1123,6 @@ if __name__ == "__main__":
             end_day=end_day,
             email=not args.off_email, 
             debug_email=args.debag_email,
+            weekly_email_to_all=args.weekly_email_all,
+            weekly_email_to_debug=args.weekly_email_debug,
         )

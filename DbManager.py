@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import date, datetime, time
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from SatPass import SatPas
 from Logger import Logger
 
@@ -609,12 +609,15 @@ class DbManager:
     # Заменяет все коммерческие пролёты списком из Telegram.
     def replace_commercial_passes(
         self,
-        passes: List[Tuple[str, str, str, str]],
+        passes: List[Tuple[Any, ...]],
         pass_type: str = "коммерческий",
     ) -> int:
         """Заменяет все записи в commercial_passes на переданный список.
 
-        Каждый элемент passes — (station_name, satellite_name, rx_start_time, rx_end_time).
+        Форматы элементов passes:
+          - (station_name, satellite_name, rx_start_time, rx_end_time)
+          - (station_name, satellite_name, rx_start_time, rx_end_time, pass_type)
+          - (station_name, satellite_name, rx_start_time, rx_end_time, pass_type, comment)
 
         Returns:
             int: Количество записанных пролётов.
@@ -623,19 +626,28 @@ class DbManager:
         try:
             conn.execute("DELETE FROM commercial_passes")
             count = 0
-            for station_name, satellite_name, rx_start, rx_end in passes:
+            for item in passes:
+                if not item or len(item) < 4:
+                    continue
+                station_name = str(item[0])
+                satellite_name = str(item[1])
+                rx_start = item[2]
+                rx_end = item[3]
+                row_pass_type = str(item[4]) if len(item) >= 5 and item[4] is not None else str(pass_type)
+                comment = str(item[5]) if len(item) >= 6 and item[5] is not None else None
                 conn.execute(
                     """
                     INSERT INTO commercial_passes (
-                        station_name, satellite_name, rx_start_time, rx_end_time, pass_type
-                    ) VALUES (?, ?, ?, ?, ?)
+                        station_name, satellite_name, rx_start_time, rx_end_time, pass_type, comment
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         station_name,
                         satellite_name,
                         self._normalize_time(rx_start),
                         self._normalize_time(rx_end),
-                        pass_type,
+                        row_pass_type,
+                        comment,
                     ),
                 )
                 count += 1
@@ -675,6 +687,7 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
+        pass_type: Optional[str] = None,
         ) -> int:
 
         """Возвращает число коммерческих пролётов за день.
@@ -684,23 +697,42 @@ class DbManager:
         """
         day_value = self._normalize_date(stat_day)
         conn = self._connect()
+        pass_type_value = str(pass_type).strip() if pass_type else None
         if up_to_datetime is not None:
             up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S")
-            row = conn.execute(
-                """
-                SELECT COUNT(*) AS cnt FROM commercial_passes
-                WHERE date(rx_start_time) = ? AND rx_start_time <= ?
-                """,
-                (day_value, up_to_str),
-            ).fetchone()
+            if pass_type_value:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ? AND rx_start_time <= ? AND pass_type = ?
+                    """,
+                    (day_value, up_to_str, pass_type_value),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ? AND rx_start_time <= ?
+                    """,
+                    (day_value, up_to_str),
+                ).fetchone()
         else:
-            row = conn.execute(
-                """
-                SELECT COUNT(*) AS cnt FROM commercial_passes
-                WHERE date(rx_start_time) = ?
-                """,
-                (day_value,),
-            ).fetchone()
+            if pass_type_value:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ? AND pass_type = ?
+                    """,
+                    (day_value, pass_type_value),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ?
+                    """,
+                    (day_value,),
+                ).fetchone()
         return int(row[0]) if row and row[0] is not None else 0
 
     # Статистика коммерческих пролётов по станциям за день (для письма, как в old_GroundLinkServer).
@@ -708,6 +740,7 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
+        pass_type: Optional[str] = None,
         ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
         """Возвращает (stats, totals) для блока «Коммерческие пролеты» в письме.
 
@@ -718,26 +751,47 @@ class DbManager:
         day_value = self._normalize_date(stat_day)
         conn = self._connect()
         up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S") if up_to_datetime else None
+        pass_type_value = str(pass_type).strip() if pass_type else None
 
         # Запланировано по станциям
         if up_to_str:
-            planned_rows = conn.execute(
-                """
-                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
-                WHERE date(rx_start_time) = ? AND rx_start_time <= ?
-                GROUP BY station_name
-                """,
-                (day_value, up_to_str),
-            ).fetchall()
+            if pass_type_value:
+                planned_rows = conn.execute(
+                    """
+                    SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ? AND rx_start_time <= ? AND pass_type = ?
+                    GROUP BY station_name
+                    """,
+                    (day_value, up_to_str, pass_type_value),
+                ).fetchall()
+            else:
+                planned_rows = conn.execute(
+                    """
+                    SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ? AND rx_start_time <= ?
+                    GROUP BY station_name
+                    """,
+                    (day_value, up_to_str),
+                ).fetchall()
         else:
-            planned_rows = conn.execute(
-                """
-                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
-                WHERE date(rx_start_time) = ?
-                GROUP BY station_name
-                """,
-                (day_value,),
-            ).fetchall()
+            if pass_type_value:
+                planned_rows = conn.execute(
+                    """
+                    SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ? AND pass_type = ?
+                    GROUP BY station_name
+                    """,
+                    (day_value, pass_type_value),
+                ).fetchall()
+            else:
+                planned_rows = conn.execute(
+                    """
+                    SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                    WHERE date(rx_start_time) = ?
+                    GROUP BY station_name
+                    """,
+                    (day_value,),
+                ).fetchall()
 
         stats: Dict[str, Dict[str, int]] = {}
         totals = {"planned": 0, "successful": 0, "not_received": 0}
@@ -750,35 +804,67 @@ class DbManager:
 
         # Принято по станциям (успешные в all_passes)
         if up_to_str:
-            received_rows = conn.execute(
-                """
-                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
-                FROM commercial_passes cp
-                INNER JOIN all_passes ap
-                  ON ap.station_name = cp.station_name
-                 AND ap.satellite_name = cp.satellite_name
-                 AND ap.pass_date = date(cp.rx_start_time)
-                 AND ap.success = 1
-                WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ?
-                GROUP BY cp.station_name
-                """,
-                (day_value, up_to_str),
-            ).fetchall()
+            if pass_type_value:
+                received_rows = conn.execute(
+                    """
+                    SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                    FROM commercial_passes cp
+                    INNER JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND cp.pass_type = ?
+                    GROUP BY cp.station_name
+                    """,
+                    (day_value, up_to_str, pass_type_value),
+                ).fetchall()
+            else:
+                received_rows = conn.execute(
+                    """
+                    SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                    FROM commercial_passes cp
+                    INNER JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ?
+                    GROUP BY cp.station_name
+                    """,
+                    (day_value, up_to_str),
+                ).fetchall()
         else:
-            received_rows = conn.execute(
-                """
-                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
-                FROM commercial_passes cp
-                INNER JOIN all_passes ap
-                  ON ap.station_name = cp.station_name
-                 AND ap.satellite_name = cp.satellite_name
-                 AND ap.pass_date = date(cp.rx_start_time)
-                 AND ap.success = 1
-                WHERE date(cp.rx_start_time) = ?
-                GROUP BY cp.station_name
-                """,
-                (day_value,),
-            ).fetchall()
+            if pass_type_value:
+                received_rows = conn.execute(
+                    """
+                    SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                    FROM commercial_passes cp
+                    INNER JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND cp.pass_type = ?
+                    GROUP BY cp.station_name
+                    """,
+                    (day_value, pass_type_value),
+                ).fetchall()
+            else:
+                received_rows = conn.execute(
+                    """
+                    SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                    FROM commercial_passes cp
+                    INNER JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ?
+                    GROUP BY cp.station_name
+                    """,
+                    (day_value,),
+                ).fetchall()
 
         for station_name, received in received_rows:
             received = int(received)
@@ -795,6 +881,8 @@ class DbManager:
         self,
         start_day: date | datetime | str,
         end_day: date | datetime | str,
+        up_to_datetime: Optional[datetime] = None,
+        pass_type: Optional[str] = None,
         ) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
         """Возвращает (stats, totals) за период дат.
 
@@ -804,15 +892,45 @@ class DbManager:
         start_value = self._normalize_date(start_day)
         end_value = self._normalize_date(end_day)
         conn = self._connect()
+        pass_type_value = str(pass_type).strip() if pass_type else None
+        up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S") if up_to_datetime else None
 
-        planned_rows = conn.execute(
-            """
-            SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
-            WHERE date(rx_start_time) BETWEEN ? AND ?
-            GROUP BY station_name
-            """,
-            (start_value, end_value),
-        ).fetchall()
+        if pass_type_value and up_to_str:
+            planned_rows = conn.execute(
+                """
+                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) BETWEEN ? AND ? AND rx_start_time <= ? AND pass_type = ?
+                GROUP BY station_name
+                """,
+                (start_value, end_value, up_to_str, pass_type_value),
+            ).fetchall()
+        elif pass_type_value:
+            planned_rows = conn.execute(
+                """
+                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) BETWEEN ? AND ? AND pass_type = ?
+                GROUP BY station_name
+                """,
+                (start_value, end_value, pass_type_value),
+            ).fetchall()
+        elif up_to_str:
+            planned_rows = conn.execute(
+                """
+                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) BETWEEN ? AND ? AND rx_start_time <= ?
+                GROUP BY station_name
+                """,
+                (start_value, end_value, up_to_str),
+            ).fetchall()
+        else:
+            planned_rows = conn.execute(
+                """
+                SELECT station_name, COUNT(*) AS cnt FROM commercial_passes
+                WHERE date(rx_start_time) BETWEEN ? AND ?
+                GROUP BY station_name
+                """,
+                (start_value, end_value),
+            ).fetchall()
 
         stats: Dict[str, Dict[str, int]] = {}
         totals = {"planned": 0, "successful": 0, "not_received": 0}
@@ -823,20 +941,66 @@ class DbManager:
             totals["planned"] += planned
             totals["not_received"] += planned
 
-        received_rows = conn.execute(
-            """
-            SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
-            FROM commercial_passes cp
-            INNER JOIN all_passes ap
-              ON ap.station_name = cp.station_name
-             AND ap.satellite_name = cp.satellite_name
-             AND ap.pass_date = date(cp.rx_start_time)
-             AND ap.success = 1
-            WHERE date(cp.rx_start_time) BETWEEN ? AND ?
-            GROUP BY cp.station_name
-            """,
-            (start_value, end_value),
-        ).fetchall()
+        if pass_type_value and up_to_str:
+            received_rows = conn.execute(
+                """
+                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ? AND cp.pass_type = ?
+                GROUP BY cp.station_name
+                """,
+                (start_value, end_value, up_to_str, pass_type_value),
+            ).fetchall()
+        elif pass_type_value:
+            received_rows = conn.execute(
+                """
+                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.pass_type = ?
+                GROUP BY cp.station_name
+                """,
+                (start_value, end_value, pass_type_value),
+            ).fetchall()
+        elif up_to_str:
+            received_rows = conn.execute(
+                """
+                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ?
+                GROUP BY cp.station_name
+                """,
+                (start_value, end_value, up_to_str),
+            ).fetchall()
+        else:
+            received_rows = conn.execute(
+                """
+                SELECT cp.station_name, COUNT(DISTINCT cp.id) AS cnt
+                FROM commercial_passes cp
+                INNER JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ?
+                GROUP BY cp.station_name
+                """,
+                (start_value, end_value),
+            ).fetchall()
 
         for station_name, received in received_rows:
             received = int(received)
@@ -897,12 +1061,14 @@ class DbManager:
         self,
         stat_day: date | datetime | str,
         up_to_datetime: Optional[datetime] = None,
-        ) -> List[Tuple[str, str, str, str, str]]:
-        """Возвращает список (station_name, satellite_name, rx_start_time, rx_end_time, graph_url) для пролётов без приёма.
+        pass_type: Optional[str] = None,
+        ) -> List[Tuple[str, str, str, str, str, str]]:
+        """Возвращает список (station_name, pass_type, satellite_name, rx_start_time, rx_end_time, graph_url) для пролётов без приёма.
         graph_url — ссылка на график из all_passes (success=0), если есть; иначе пустая строка.
         """
         day_value = self._normalize_date(stat_day)
         conn = self._connect()
+        pass_type_value = str(pass_type).strip() if pass_type else None
         subq = """
             (SELECT ap.graph_url FROM all_passes ap
              WHERE ap.station_name = cp.station_name
@@ -914,37 +1080,76 @@ class DbManager:
         """
         if up_to_datetime is not None:
             up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S")
-            rows = conn.execute(
-                f"""
-                SELECT cp.station_name, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
-                FROM commercial_passes cp
-                LEFT JOIN all_passes ap
-                  ON ap.station_name = cp.station_name
-                 AND ap.satellite_name = cp.satellite_name
-                 AND ap.pass_date = date(cp.rx_start_time)
-                 AND ap.success = 1
-                WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND ap.id IS NULL
-                ORDER BY cp.station_name, cp.rx_start_time
-                """,
-                (day_value, up_to_str),
-            ).fetchall()
+            if pass_type_value:
+                rows = conn.execute(
+                    f"""
+                    SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                    FROM commercial_passes cp
+                    LEFT JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND cp.pass_type = ? AND ap.id IS NULL
+                    ORDER BY cp.station_name, cp.rx_start_time
+                    """,
+                    (day_value, up_to_str, pass_type_value),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                    FROM commercial_passes cp
+                    LEFT JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND ap.id IS NULL
+                    ORDER BY cp.station_name, cp.rx_start_time
+                    """,
+                    (day_value, up_to_str),
+                ).fetchall()
         else:
-            rows = conn.execute(
-                f"""
-                SELECT cp.station_name, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
-                FROM commercial_passes cp
-                LEFT JOIN all_passes ap
-                  ON ap.station_name = cp.station_name
-                 AND ap.satellite_name = cp.satellite_name
-                 AND ap.pass_date = date(cp.rx_start_time)
-                 AND ap.success = 1
-                WHERE date(cp.rx_start_time) = ? AND ap.id IS NULL
-                ORDER BY cp.station_name, cp.rx_start_time
-                """,
-                (day_value,),
-            ).fetchall()
+            if pass_type_value:
+                rows = conn.execute(
+                    f"""
+                    SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                    FROM commercial_passes cp
+                    LEFT JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND cp.pass_type = ? AND ap.id IS NULL
+                    ORDER BY cp.station_name, cp.rx_start_time
+                    """,
+                    (day_value, pass_type_value),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                    FROM commercial_passes cp
+                    LEFT JOIN all_passes ap
+                      ON ap.station_name = cp.station_name
+                     AND ap.satellite_name = cp.satellite_name
+                     AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.success = 1
+                    WHERE date(cp.rx_start_time) = ? AND ap.id IS NULL
+                    ORDER BY cp.station_name, cp.rx_start_time
+                    """,
+                    (day_value,),
+                ).fetchall()
         return [
-            (str(r[0]), str(r[1]), str(r[2] or ""), str(r[3] or ""), str(r[4] or "").strip())
+            (
+                str(r[0]),
+                str(r[1] or ""),
+                str(r[2]),
+                str(r[3] or ""),
+                str(r[4] or ""),
+                str(r[5] or "").strip(),
+            )
             for r in rows
         ]
 
@@ -953,11 +1158,15 @@ class DbManager:
         self,
         start_day: date | datetime | str,
         end_day: date | datetime | str,
-        ) -> List[Tuple[str, str, str, str, str]]:
-        """Возвращает список (station_name, satellite_name, rx_start_time, rx_end_time, graph_url) за период."""
+        up_to_datetime: Optional[datetime] = None,
+        pass_type: Optional[str] = None,
+        ) -> List[Tuple[str, str, str, str, str, str]]:
+        """Возвращает список (station_name, pass_type, satellite_name, rx_start_time, rx_end_time, graph_url) за период."""
         start_value = self._normalize_date(start_day)
         end_value = self._normalize_date(end_day)
         conn = self._connect()
+        pass_type_value = str(pass_type).strip() if pass_type else None
+        up_to_str = up_to_datetime.strftime("%Y-%m-%d %H:%M:%S") if up_to_datetime else None
         subq = """
             (SELECT ap.graph_url FROM all_passes ap
              WHERE ap.station_name = cp.station_name
@@ -967,22 +1176,75 @@ class DbManager:
                AND ap.graph_url IS NOT NULL AND ap.graph_url != ''
              LIMIT 1)
         """
-        rows = conn.execute(
-            f"""
-            SELECT cp.station_name, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
-            FROM commercial_passes cp
-            LEFT JOIN all_passes ap
-              ON ap.station_name = cp.station_name
-             AND ap.satellite_name = cp.satellite_name
-             AND ap.pass_date = date(cp.rx_start_time)
-             AND ap.success = 1
-            WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND ap.id IS NULL
-            ORDER BY cp.station_name, cp.rx_start_time
-            """,
-            (start_value, end_value),
-        ).fetchall()
+        if pass_type_value and up_to_str:
+            rows = conn.execute(
+                f"""
+                SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                FROM commercial_passes cp
+                LEFT JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ? AND cp.pass_type = ? AND ap.id IS NULL
+                ORDER BY cp.station_name, cp.rx_start_time
+                """,
+                (start_value, end_value, up_to_str, pass_type_value),
+            ).fetchall()
+        elif pass_type_value:
+            rows = conn.execute(
+                f"""
+                SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                FROM commercial_passes cp
+                LEFT JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.pass_type = ? AND ap.id IS NULL
+                ORDER BY cp.station_name, cp.rx_start_time
+                """,
+                (start_value, end_value, pass_type_value),
+            ).fetchall()
+        elif up_to_str:
+            rows = conn.execute(
+                f"""
+                SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                FROM commercial_passes cp
+                LEFT JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ? AND ap.id IS NULL
+                ORDER BY cp.station_name, cp.rx_start_time
+                """,
+                (start_value, end_value, up_to_str),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"""
+                SELECT cp.station_name, cp.pass_type, cp.satellite_name, cp.rx_start_time, cp.rx_end_time, {subq} AS graph_url
+                FROM commercial_passes cp
+                LEFT JOIN all_passes ap
+                  ON ap.station_name = cp.station_name
+                 AND ap.satellite_name = cp.satellite_name
+                 AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.success = 1
+                WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND ap.id IS NULL
+                ORDER BY cp.station_name, cp.rx_start_time
+                """,
+                (start_value, end_value),
+            ).fetchall()
         return [
-            (str(r[0]), str(r[1]), str(r[2] or ""), str(r[3] or ""), str(r[4] or "").strip())
+            (
+                str(r[0]),
+                str(r[1] or ""),
+                str(r[2]),
+                str(r[3] or ""),
+                str(r[4] or ""),
+                str(r[5] or "").strip(),
+            )
             for r in rows
         ]
 

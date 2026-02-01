@@ -6,7 +6,7 @@
 
 Структура config["email"]:
     enabled, smtp_server, smtp_port, sender_email, sender_password,
-    recipient_email (или to), cc (или cc_emails), subject, attach_report.
+    recipient_email (или to), cc (или cc_emails), subject, weekly_subject, attach_report.
 
 Пример использования:
     client = EmailClient(logger=logger, config=config)
@@ -19,7 +19,7 @@
 import os
 import re
 import smtplib
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,6 +43,7 @@ class EmailClient:
         _load_email_defaults_from_test_email: Загрузка SMTP-настроек из test_email.py.
         get_email_settings: Получение настроек email из config, env и test_email.
         build_stats_email_body: Формирование HTML-тела письма со статистикой и графиками.
+        send_weekly_stats_email: Отправка отдельного weekly-письма (воскресенье, 7 дней).
         send_stats_email: Отправка письма через SMTP с inline-изображениями и вложениями.
 
     Атрибуты:
@@ -92,12 +93,13 @@ class EmailClient:
         self,
         config: Optional[Dict[str, Any]] = None,
         debug_recipient: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        ) -> Dict[str, Any]:
         """Возвращает настройки для отправки email.
 
         Источники (в порядке приоритета): config["email"], переменные окружения,
         test_email.py. Переменные окружения: EMAIL_ENABLED, SMTP_SERVER, SMTP_PORT,
         SENDER_EMAIL, SENDER_PASSWORD, RECIPIENT_EMAIL, EMAIL_CC, EMAIL_SUBJECT,
+        EMAIL_WEEKLY_SUBJECT,
         EMAIL_ATTACH_REPORT.
 
         Args:
@@ -106,7 +108,7 @@ class EmailClient:
 
         Returns:
             dict с ключами: enabled, smtp_server, smtp_port, sender_email,
-            sender_password, recipients, cc_recipients, subject, attach_report.
+            sender_password, recipients, cc_recipients, subject, weekly_subject, attach_report.
         """
         defaults = self._load_email_defaults_from_test_email()
         cfg = config if config is not None else self.config
@@ -174,6 +176,16 @@ class EmailClient:
             or "Ежедневное письмо"
         )
 
+        weekly_subject = (
+            email_cfg.get("weekly_subject")
+            or os.getenv("EMAIL_WEEKLY_SUBJECT")
+            or ""
+        )
+        weekly_subject = str(weekly_subject or "").strip()
+        if not weekly_subject:
+            base_subject = str(subject or "").strip()
+            weekly_subject = f"{base_subject} за неделю" if base_subject else "Сводка работы станций за неделю"
+
         attach_report_raw = email_cfg.get("attach_report", os.getenv("EMAIL_ATTACH_REPORT", "1"))
         attach_report = True if attach_report_raw is None else str(attach_report_raw).strip().lower() in ("1", "true", "yes", "y", "on")
 
@@ -192,6 +204,7 @@ class EmailClient:
             "recipients": recipients_final,
             "cc_recipients": cc_final,
             "subject": subject,
+            "weekly_subject": weekly_subject,
             "attach_report": attach_report,
         }
 
@@ -204,9 +217,12 @@ class EmailClient:
         summary_7d_chart_path: Optional[Path] = None,
         comm_stats: Optional[Dict[str, Dict[str, int]]] = None,
         comm_totals: Optional[Dict[str, int]] = None,
+        comm_rows_typed: Optional[List[Tuple[str, str, int, int, int]]] = None,
         comm_summary_7d_chart_path: Optional[Path] = None,
         comm_links: Optional[Dict[str, List[str]]] = None,
         comm_not_received_list: Optional[List[Tuple[str, str, str, str, str]]] = None,
+        report_kind: str = "daily",
+        report_title: Optional[str] = None,
         ) -> Tuple[str, Dict[str, Path]]:
         """Формирует HTML-тело письма со статистикой и графиками.
 
@@ -223,9 +239,14 @@ class EmailClient:
             summary_7d_chart_path: Путь к сводному графику % пустых за 7 дней.
             comm_stats: {station: {planned, successful, not_received}} для коммерческих.
             comm_totals: {planned, successful, not_received} — итоги коммерческих.
+            comm_rows_typed: [(station_name, pass_type_label, planned, successful, not_received), ...] —
+                             используется для агрегирования по станции (тип в таблице не выводится).
             comm_summary_7d_chart_path: График % непринятых коммерческих за 7 дней.
             comm_links: {successful: [urls], unsuccessful: [urls]} — ссылки на графики.
             comm_not_received_list: [(station, satellite, rx_start, rx_end, graph_url), ...].
+            report_kind: Тип отчёта ("daily" | "weekly"). В weekly-режиме скрываются
+                         дневные графики лучшего пролёта и список пустых пролётов.
+            report_title: Заголовок письма (если не задан — используется заголовок по умолчанию).
 
         Returns:
             (html_body: str, inline_images: {cid: Path}) — тело письма и карта CID→файл.
@@ -576,14 +597,16 @@ class EmailClient:
             "<body>",
             "<div class='container'>",
             "  <div class='header'>",
-            f"    <h2>Сводка по станциям {date_display}</h2>",
+            f"    <h2>{(report_title or f'Сводка по станциям {date_display}')}</h2>",
             "  </div>",
             "  <div class='content'>"
         ]
 
         # Коммерческие пролеты (как в old_GroundLinkServer) — первым блоком
-        if comm_stats is not None and comm_totals is not None:
-            html_lines.append("    <h2 style='margin-top: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Коммерческие пролеты</h2>")
+        # Таблица агрегирована по станции (тип показываем только в списке непринятых).
+        if (comm_rows_typed is not None) or (comm_stats is not None and comm_totals is not None):
+            comm_title = "Коммерческие пролеты" if report_kind != "weekly" else "Коммерческие пролеты за неделю"
+            html_lines.append(f"    <h2 style='margin-top: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>{comm_title}</h2>")
             html_lines.append("    <div class='table-wrap'>")
             html_lines.append("      <table class='adaptive-table'>")
             html_lines.append("        <thead>")
@@ -597,11 +620,31 @@ class EmailClient:
             html_lines.append("        </thead>")
             html_lines.append("        <tbody>")
 
-            for station_name in sorted(comm_stats.keys()):
-                stats = comm_stats[station_name]
-                planned = int(stats.get("planned", 0))
-                successful = int(stats.get("successful", 0))
-                not_received = int(stats.get("not_received", 0))
+            # Сырые строки могут быть типизированы, но таблица агрегируется по станции.
+            rows_typed: List[Tuple[str, str, int, int, int]] = []
+            if comm_rows_typed is not None:
+                rows_typed = list(comm_rows_typed)
+            elif comm_stats is not None:
+                for station_name in sorted(comm_stats.keys()):
+                    stats = comm_stats[station_name]
+                    planned = int(stats.get("planned", 0))
+                    successful = int(stats.get("successful", 0))
+                    not_received = int(stats.get("not_received", 0))
+                    rows_typed.append((station_name, "коммерческий", planned, successful, not_received))
+
+            agg: Dict[str, Dict[str, int]] = {}
+            for station_name, _pass_type_label, planned, successful, not_received in rows_typed:
+                st = str(station_name)
+                if st not in agg:
+                    agg[st] = {"planned": 0, "successful": 0, "not_received": 0}
+                agg[st]["planned"] += int(planned or 0)
+                agg[st]["successful"] += int(successful or 0)
+                agg[st]["not_received"] += int(not_received or 0)
+
+            for station_name in sorted(agg.keys()):
+                planned = int(agg[station_name]["planned"])
+                successful = int(agg[station_name]["successful"])
+                not_received = int(agg[station_name]["not_received"])
                 percent = (not_received / planned * 100) if planned > 0 else 0.0
                 if planned == 0:
                     row_class = "row-good"
@@ -620,9 +663,14 @@ class EmailClient:
                 html_lines.append(f"          <td class='number'>{percent:.1f}%</td>")
                 html_lines.append("        </tr>")
 
-            total_planned = int(comm_totals.get("planned", 0))
-            total_successful = int(comm_totals.get("successful", 0))
-            total_not_received = int(comm_totals.get("not_received", 0))
+            if comm_totals is not None:
+                total_planned = int(comm_totals.get("planned", 0))
+                total_successful = int(comm_totals.get("successful", 0))
+                total_not_received = int(comm_totals.get("not_received", 0))
+            else:
+                total_planned = sum(int(v.get("planned", 0) or 0) for v in agg.values())
+                total_successful = sum(int(v.get("successful", 0) or 0) for v in agg.values())
+                total_not_received = sum(int(v.get("not_received", 0) or 0) for v in agg.values())
             total_percent = (total_not_received / total_planned * 100) if total_planned > 0 else 0.0
             html_lines.append("        <tr class='total-row'>")
             html_lines.append("          <td>ИТОГО</td>")
@@ -644,17 +692,31 @@ class EmailClient:
 
             if comm_not_received_list:
                 html_lines.append("    <div class='graph-section' style='margin-top:12px;'>")
-                html_lines.append("      <div class='graph-title'>Не принятые коммерческие пролёты</div>")
+                nr_title = "Не принятые коммерческие пролёты" if report_kind != "weekly" else "Не принятые коммерческие пролёты за неделю:"
+                html_lines.append(f"      <div class='graph-title'>{nr_title}</div>")
                 html_lines.append("      <ul style='margin:8px 0; padding-left:20px;'>")
                 for item in comm_not_received_list:
-                    station_name = item[0]
-                    satellite_name = item[1]
-                    rx_start = item[2]
-                    rx_end = item[3]
-                    graph_url = (item[4] if len(item) > 4 else "").strip()
+                    # Поддержка форматов:
+                    # (station, satellite, rx_start, rx_end, graph_url)
+                    # (station, pass_type, satellite, rx_start, rx_end, graph_url)
+                    if len(item) >= 6:
+                        station_name = item[0]
+                        pass_type_raw = item[1]
+                        satellite_name = item[2]
+                        rx_start = item[3]
+                        rx_end = item[4]
+                        graph_url = (item[5] if len(item) > 5 else "").strip()
+                    else:
+                        station_name = item[0]
+                        pass_type_raw = "коммерческий"
+                        satellite_name = item[1]
+                        rx_start = item[2]
+                        rx_end = item[3]
+                        graph_url = (item[4] if len(item) > 4 else "").strip()
+                    pass_type_label = "тестовый" if "тест" in str(pass_type_raw).lower() else "коммерческий"
                     station_esc = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     satellite_esc = satellite_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    label = f"{station_esc} — {satellite_esc}: {rx_start} – {rx_end}"
+                    label = f"{station_esc} — {satellite_esc} ({pass_type_label}): {rx_start} – {rx_end}"
                     if graph_url:
                         url_esc = graph_url.replace("&", "&amp;").replace('"', "&quot;")
                         html_lines.append(f"        <li><a href='{url_esc}'>{label}</a></li>")
@@ -663,7 +725,7 @@ class EmailClient:
                 html_lines.append("      </ul>")
                 html_lines.append("    </div>")
 
-            if comm_links:
+            if comm_links and report_kind != "weekly":
                 success_links = comm_links.get("successful") or []
                 fail_links = comm_links.get("unsuccessful") or []
                 html_lines.append("    <div class='graph-section'>")
@@ -687,7 +749,8 @@ class EmailClient:
                 html_lines.append("    </div>")
 
         # Общая статистика по станциям (как в old_GroundLinkServer)
-        html_lines.append("    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Общая статистика</h2>")
+        all_title = "Общая статистика" if report_kind != "weekly" else "Статистика за неделю"
+        html_lines.append(f"    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>{all_title}</h2>")
         html_lines.append("    <div class='table-wrap'>")
         html_lines.append("      <table class='adaptive-table'>")
         html_lines.append("        <thead>")
@@ -750,7 +813,8 @@ class EmailClient:
 
         # Графики пролетов по станциям (как в old_GroundLinkServer): по 1 лучшему пролету с графиком + список пустых
         graphs_dir_p = Path(graphs_dir) if graphs_dir else None
-        html_lines.append("    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>Графики пролетов</h2>")
+        graphs_title = "Графики пролетов" if report_kind != "weekly" else "Графики по станциям (7 дней)"
+        html_lines.append(f"    <h2 style='margin-top: 48px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; color: #1d1d1f;'>{graphs_title}</h2>")
         for station_name, stats in sorted_stations:
             station_name_escaped = station_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             html_lines.append("    <div class='graph-section'>")
@@ -758,46 +822,49 @@ class EmailClient:
             max_snr_filename = stats.get("max_snr_filename", "")
             best_graph_path = stats.get("best_graph_path")
             graph_path = None
-            if best_graph_path and Path(best_graph_path).exists():
-                graph_path = Path(best_graph_path)
-            elif max_snr_filename and graphs_dir_p and graphs_dir_p.exists():
-                graph_name = max_snr_filename.replace(".log", ".png").replace(" ", "_")
-                graph_path = graphs_dir_p / station_name / graph_name
-                if not graph_path.exists():
-                    graph_path = graphs_dir_p / graph_name
-                if not graph_path.exists():
-                    graph_path = None
-            if graph_path and graph_path.exists():
-                graph_name = graph_path.name
-                cid = f"graph_{station_name}_{graph_name}".replace(" ", "_").replace(".", "_")
-                inline_images[cid] = graph_path
-                html_lines.append(f"      <img src='cid:{cid}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='График для {station_name_escaped}' />")
-            elif max_snr_filename:
-                html_lines.append("      <p class='empty-message'>График лучшего пролета не найден</p>")
-            else:
-                html_lines.append("      <p class='empty-message'>Нет данных по лучшему пролету</p>")
+            if report_kind != "weekly":
+                if best_graph_path and Path(best_graph_path).exists():
+                    graph_path = Path(best_graph_path)
+                elif max_snr_filename and graphs_dir_p and graphs_dir_p.exists():
+                    graph_name = max_snr_filename.replace(".log", ".png").replace(" ", "_")
+                    graph_path = graphs_dir_p / station_name / graph_name
+                    if not graph_path.exists():
+                        graph_path = graphs_dir_p / graph_name
+                    if not graph_path.exists():
+                        graph_path = None
+                if graph_path and graph_path.exists():
+                    graph_name = graph_path.name
+                    cid = f"graph_{station_name}_{graph_name}".replace(" ", "_").replace(".", "_")
+                    inline_images[cid] = graph_path
+                    html_lines.append(f"      <img src='cid:{cid}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='График для {station_name_escaped}' />")
+                elif max_snr_filename:
+                    html_lines.append("      <p class='empty-message'>График лучшего пролета не найден</p>")
+                else:
+                    html_lines.append("      <p class='empty-message'>Нет данных по лучшему пролету</p>")
             # График % пустых за 7 дней по станции
             station_7d_path = stats.get("station_7d_chart_path")
             if station_7d_path and Path(station_7d_path).exists():
                 station_7d_p = Path(station_7d_path)
                 cid_7d = f"station_7d_{station_name}".replace(" ", "_").replace(".", "_")
                 inline_images[cid_7d] = station_7d_p
-                html_lines.append("      <p style='margin-top:12px;font-size:13px;color:#86868b;'>Пустые пролеты за 7 дней</p>")
+                if report_kind != "weekly":
+                    html_lines.append("      <p style='margin-top:12px;font-size:13px;color:#86868b;'>Пустые пролеты за 7 дней</p>")
                 html_lines.append(f"      <img src='cid:{cid_7d}' class='graph-image' style='width:100%;max-width:100%;height:auto;display:block;' alt='% пустых за 7 дней — {station_name_escaped}' />")
-            unsuccessful_filenames = stats.get("unsuccessful_filenames", [])
-            if unsuccessful_filenames:
-                html_lines.append("      <div class='unsuccessful-list'>")
-                html_lines.append(f"        <strong>Пустые пролеты ({len(unsuccessful_filenames)})</strong>")
-                html_lines.append("        <ul>")
-                for item in unsuccessful_filenames:
-                    s = str(item).strip()
-                    if s.startswith("http://") or s.startswith("https://"):
-                        link_url = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    else:
-                        link_url = f"https://eus.lorett.org/eus/log_view/{quote(s)}".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    html_lines.append(f"          <li><a href='{link_url}' target='_blank' rel='noopener noreferrer'>{link_url}</a></li>")
-                html_lines.append("        </ul>")
-                html_lines.append("      </div>")
+            if report_kind != "weekly":
+                unsuccessful_filenames = stats.get("unsuccessful_filenames", [])
+                if unsuccessful_filenames:
+                    html_lines.append("      <div class='unsuccessful-list'>")
+                    html_lines.append(f"        <strong>Пустые пролеты ({len(unsuccessful_filenames)})</strong>")
+                    html_lines.append("        <ul>")
+                    for item in unsuccessful_filenames:
+                        s = str(item).strip()
+                        if s.startswith("http://") or s.startswith("https://"):
+                            link_url = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        else:
+                            link_url = f"https://eus.lorett.org/eus/log_view/{quote(s)}".replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        html_lines.append(f"          <li><a href='{link_url}' target='_blank' rel='noopener noreferrer'>{link_url}</a></li>")
+                    html_lines.append("        </ul>")
+                    html_lines.append("      </div>")
             html_lines.append("    </div>")
 
         html_lines.extend([
@@ -807,6 +874,91 @@ class EmailClient:
             "</html>",
         ])
         return "\n".join(html_lines), inline_images
+
+    # Отправляет еженедельное письмо со статистикой за последние 7 дней (воскресенье).
+    def send_weekly_stats_email(
+        self,
+        *,
+        settings: Dict[str, Any],
+        target_date: str,
+        week_start: date,
+        week_end: date,
+        weekly_results: Dict[str, Dict[str, Any]],
+        graphs_dir: Optional[Path] = None,
+        summary_7d_chart_path: Optional[Path] = None,
+        comm_stats: Optional[Dict[str, Dict[str, int]]] = None,
+        comm_totals: Optional[Dict[str, int]] = None,
+        comm_rows_typed: Optional[List[Tuple[str, str, int, int, int]]] = None,
+        comm_summary_7d_chart_path: Optional[Path] = None,
+        comm_not_received_list: Optional[List[Tuple[str, str, str, str, str]]] = None,
+        ) -> bool:
+        """Отправляет письмо со статистикой за последние 7 дней.
+
+        Метод предназначен для дополнительной еженедельной рассылки (воскресенье, UTC).
+        Он формирует заголовок/тему, строит HTML через build_stats_email_body(report_kind="weekly"),
+        и отправляет письмо через send_stats_email().
+
+        Args:
+            settings: Настройки отправки (результат get_email_settings()).
+            target_date: Дата в формате YYYYMMDD (конец периода для графиков).
+            week_start: Дата начала периода (включительно).
+            week_end: Дата конца периода (включительно).
+            weekly_results: Данные по станциям за неделю в формате all_results для build_stats_email_body.
+            graphs_dir: Каталог с графиками (используется для резолва путей).
+            summary_7d_chart_path: Сводный график % пустых за 7 дней.
+            comm_stats: Коммерческая статистика по станциям за неделю.
+            comm_totals: Итоги коммерческих за неделю.
+            comm_summary_7d_chart_path: График % непринятых коммерческих за 7 дней.
+            comm_not_received_list: Список непринятых коммерческих пролётов за неделю.
+
+        Returns:
+            True если письмо отправлено, иначе False (включая случаи skip).
+        """
+        if not settings or not settings.get("enabled"):
+            self.logger.info("weekly email: disabled by settings")
+            return False
+
+        comm_planned = int((comm_totals or {}).get("planned", 0) or 0)
+        weekly_has_data = bool(weekly_results) or comm_planned > 0
+        if not weekly_has_data:
+            self.logger.info(f"weekly email skipped for {week_start}..{week_end}: no data")
+            return False
+
+        start_disp = week_start.strftime("%d.%m.%Y")
+        end_disp = week_end.strftime("%d.%m.%Y")
+        weekly_title = f"Сводка за неделю {start_disp} – {end_disp}"
+
+        weekly_subject = str(settings.get("weekly_subject") or "").strip()
+        if not weekly_subject:
+            base_subject = str(settings.get("subject") or "").strip()
+            weekly_subject = f"{base_subject} за неделю" if base_subject else "Сводка работы станций за неделю"
+
+        body_week, inline_week = self.build_stats_email_body(
+            target_date,
+            weekly_results,
+            graphs_dir=graphs_dir,
+            summary_7d_chart_path=summary_7d_chart_path,
+            comm_stats=comm_stats,
+            comm_totals=comm_totals,
+            comm_rows_typed=comm_rows_typed,
+            comm_summary_7d_chart_path=comm_summary_7d_chart_path,
+            comm_not_received_list=comm_not_received_list,
+            report_kind="weekly",
+            report_title=weekly_title,
+        )
+
+        return self.send_stats_email(
+            smtp_server=settings["smtp_server"],
+            smtp_port=settings["smtp_port"],
+            sender_email=settings["sender_email"],
+            sender_password=settings["sender_password"],
+            recipients=settings["recipients"],
+            cc_recipients=settings.get("cc_recipients"),
+            subject=weekly_subject,
+            body=body_week,
+            attachments=None,
+            inline_images=inline_week,
+        )
 
     # Отправляет письмо через SMTP с inline-изображениями и вложениями.
     def send_stats_email(
@@ -842,18 +994,25 @@ class EmailClient:
         Returns:
             True при успешной отправке, False при ошибке или отсутствии получателей.
         """
-        if not sender_email or not sender_password or not recipients:
+        to_recipients = [str(r).strip() for r in (recipients or []) if str(r).strip()]
+        cc_final = [str(r).strip() for r in (cc_recipients or []) if str(r).strip()]
+        if not sender_email or not sender_password or not to_recipients:
             self.logger.warning("Email: не заданы sender/password/recipients — отправка пропущена")
             return False
 
         msg = MIMEMultipart()
         msg["From"] = sender_email
-        msg["To"] = ", ".join(recipients)
-        if cc_recipients:
-            msg["Cc"] = ", ".join([r for r in cc_recipients if r])
+        msg["To"] = ", ".join(to_recipients)
+        if cc_final:
+            msg["Cc"] = ", ".join(cc_final)
         msg["Subject"] = subject
         is_html = body.strip().startswith("<!DOCTYPE html>") or body.strip().startswith("<html>")
         msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
+
+        cc_log = f"; cc={', '.join(cc_final)}" if cc_final else ""
+        self.logger.info(
+            f"Email: отправка письма to={', '.join(to_recipients)}{cc_log}; subject={subject}"
+        )
 
         if inline_images:
             for cid, image_path in inline_images.items():
@@ -888,9 +1047,8 @@ class EmailClient:
                 if int(smtp_port) == 587:
                     server.starttls()
             server.login(sender_email, sender_password)
-            all_recipients: List[str] = list(recipients or [])
-            if cc_recipients:
-                all_recipients.extend([r for r in cc_recipients if r])
+            # Список реальных получателей для SMTP (To + Cc), без дублей и пустых значений.
+            all_recipients: List[str] = list(dict.fromkeys([*to_recipients, *cc_final]))
             server.send_message(msg, from_addr=sender_email, to_addrs=all_recipients)
             server.quit()
             return True
