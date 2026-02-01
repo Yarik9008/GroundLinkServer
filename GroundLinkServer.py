@@ -365,6 +365,21 @@ class GroundLinkServer:
             rows.append((station_name, planned, successful, not_received, pct))
         total_pct = (totals["not_received"] * 100.0 / totals["planned"]) if totals["planned"] else 0.0
         not_received_list = self.db_manager.get_commercial_passes_not_received_list(day, up_to_datetime)
+
+        # Сколько ещё запланировано до конца текущих суток (UTC): считаем только для "сегодня".
+        planned_remaining_today = None
+        if up_to_datetime is not None:
+            try:
+                day_date = day.date() if isinstance(day, datetime) else day
+            except Exception:
+                day_date = None
+            if day_date == up_to_datetime.date():
+                planned_full_day = self.db_manager.get_commercial_passes_planned_count(day_date)
+                planned_up_to_now = self.db_manager.get_commercial_passes_planned_count(
+                    day_date, up_to_datetime=up_to_datetime
+                )
+                planned_remaining_today = max(0, int(planned_full_day) - int(planned_up_to_now))
+
         return {
             "date_display": date_display,
             "rows": rows,
@@ -375,6 +390,7 @@ class GroundLinkServer:
                 "not_received_percent": total_pct,
             },
             "not_received_list": not_received_list,
+            "planned_remaining_today": planned_remaining_today,
         }
 
     # Вывод статистики коммерческих пролётов за день в консоль.
@@ -406,6 +422,10 @@ class GroundLinkServer:
             f"{Fore.GREEN + Style.BRIGHT}{'ИТОГО':<30} {totals['planned']:>12} {totals['successful']:>12} "
             f"{totals['not_received']:>14} {totals['not_received_percent']:>14.1f}%"
         )
+        # Для "сегодня" показываем, сколько ещё запланировано до конца суток (UTC)
+        remaining = stats.get("planned_remaining_today")
+        if remaining is not None:
+            print(f"{Fore.BLUE}Планируется до конца дня (UTC): {int(remaining)}")
         not_received_list = stats.get("not_received_list") or []
         if not_received_list:
             print(f"\n{Fore.BLUE + Style.BRIGHT}НЕ ПРИНЯТЫЕ КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА ДЕНЬ")
