@@ -669,7 +669,8 @@ class GroundLinkServer:
             comm_week_stats = self.build_comm_week_stats(current_day, up_to_datetime=comm_week_up_to)
             self.print_comm_week_stats(comm_week_stats)
 
-            if daily_stats and (email or debug_email):
+            # When explicitly sending weekly to all/debug, suppress daily email.
+            if daily_stats and (email or debug_email) and not (weekly_email_to_all or weekly_email_to_debug):
                 target_date = current_day.strftime("%Y%m%d")
                 stations_filter = self.config.get("stations_for_email") or []
                 if isinstance(stations_filter, list):
@@ -839,8 +840,8 @@ class GroundLinkServer:
             # отправляется по воскресеньям (UTC) один раз за запуск, даже если за день нет данных.
             # Управление получателями weekly-письма отдельными флагами (all/debug).
             if email or debug_email or weekly_email_to_all or weekly_email_to_debug:
-                today_utc = datetime.now(timezone.utc).date()
-                if today_utc.weekday() == 6 and current_day == end_day:
+                # Weekly should be based on report day (current_day), not "today"
+                if current_day.weekday() == 6 and current_day == end_day:
                     week_end = current_day
                     week_start = week_end - timedelta(days=6)
                     target_date = current_day.strftime("%Y%m%d")
@@ -1116,8 +1117,26 @@ if __name__ == "__main__":
                 hours = int(remaining // 3600)
                 seconds = int(remaining % 3600)
                 server.logger.info(f"time until UTC midnight: {hours}h {seconds}s")
+                # Weekly email is sent at 00:00 UTC Monday (report day is Sunday).
                 if will_send_weekly:
                     server.logger.info(f"time until weekly email send: {hours}h {seconds}s")
+                else:
+                    # Countdown to the next weekly send (next Monday 00:00 UTC).
+                    days_until_monday = (7 - now.weekday()) % 7
+                    if days_until_monday == 0:
+                        days_until_monday = 7
+                    next_weekly_midnight = datetime.combine(
+                        now.date() + timedelta(days=days_until_monday),
+                        datetime.min.time(),
+                        tzinfo=timezone.utc,
+                    )
+                    remaining_weekly = max(0, int((next_weekly_midnight - now).total_seconds()))
+                    w_days = remaining_weekly // 86400
+                    w_hours = (remaining_weekly % 86400) // 3600
+                    w_seconds = remaining_weekly % 3600
+                    server.logger.info(
+                        f"time until weekly email send: {w_days}d {w_hours}h {w_seconds}s"
+                    )
                 time.sleep(min(3600, remaining))
 
             # небольшой буфер, чтобы точно перейти за границу дня
