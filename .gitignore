@@ -12,3 +12,5 @@ telegram.session
 server_logs/
 report/
 passes_logs/
+config.json
+groundlink.db
