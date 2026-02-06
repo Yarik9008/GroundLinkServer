@@ -802,7 +802,7 @@ class DbManager:
             totals["planned"] += planned
             totals["not_received"] += planned
 
-        # Принято по станциям (успешные в all_passes)
+        # Принято по станциям (успешные в all_passes, с учетом времени пролета)
         if up_to_str:
             if pass_type_value:
                 received_rows = conn.execute(
@@ -813,6 +813,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND cp.pass_type = ?
                     GROUP BY cp.station_name
@@ -828,6 +830,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ?
                     GROUP BY cp.station_name
@@ -844,6 +848,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND cp.pass_type = ?
                     GROUP BY cp.station_name
@@ -859,6 +865,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ?
                     GROUP BY cp.station_name
@@ -950,6 +958,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ? AND cp.pass_type = ?
                 GROUP BY cp.station_name
@@ -965,6 +975,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.pass_type = ?
                 GROUP BY cp.station_name
@@ -980,6 +992,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ?
                 GROUP BY cp.station_name
@@ -995,6 +1009,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ?
                 GROUP BY cp.station_name
@@ -1020,7 +1036,8 @@ class DbManager:
         ) -> int:
         """Возвращает число коммерческих пролётов за день, по которым есть успешный приём в all_passes.
 
-        Сопоставление: станция + спутник + дата. Если задан up_to_datetime (UTC), считаются только
+        Сопоставление: станция + спутник + дата + время (пересечение интервалов).
+        Если задан up_to_datetime (UTC), считаются только
         пролёты с rx_start_time <= этого момента — тогда принято не может превысить заказано.
         """
         day_value = self._normalize_date(stat_day)
@@ -1035,6 +1052,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ?
                 """,
@@ -1049,6 +1068,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) = ?
                 """,
@@ -1074,6 +1095,8 @@ class DbManager:
              WHERE ap.station_name = cp.station_name
                AND ap.satellite_name = cp.satellite_name
                AND ap.pass_date = date(cp.rx_start_time)
+               AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+               AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                AND ap.success = 0
                AND ap.graph_url IS NOT NULL AND ap.graph_url != ''
              LIMIT 1)
@@ -1089,6 +1112,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND cp.pass_type = ? AND ap.id IS NULL
                     ORDER BY cp.station_name, cp.rx_start_time
@@ -1104,6 +1129,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND cp.rx_start_time <= ? AND ap.id IS NULL
                     ORDER BY cp.station_name, cp.rx_start_time
@@ -1120,6 +1147,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND cp.pass_type = ? AND ap.id IS NULL
                     ORDER BY cp.station_name, cp.rx_start_time
@@ -1135,6 +1164,8 @@ class DbManager:
                       ON ap.station_name = cp.station_name
                      AND ap.satellite_name = cp.satellite_name
                      AND ap.pass_date = date(cp.rx_start_time)
+                     AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                     AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                      AND ap.success = 1
                     WHERE date(cp.rx_start_time) = ? AND ap.id IS NULL
                     ORDER BY cp.station_name, cp.rx_start_time
@@ -1172,6 +1203,8 @@ class DbManager:
              WHERE ap.station_name = cp.station_name
                AND ap.satellite_name = cp.satellite_name
                AND ap.pass_date = date(cp.rx_start_time)
+               AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+               AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                AND ap.success = 0
                AND ap.graph_url IS NOT NULL AND ap.graph_url != ''
              LIMIT 1)
@@ -1185,6 +1218,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ? AND cp.pass_type = ? AND ap.id IS NULL
                 ORDER BY cp.station_name, cp.rx_start_time
@@ -1200,6 +1235,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.pass_type = ? AND ap.id IS NULL
                 ORDER BY cp.station_name, cp.rx_start_time
@@ -1215,6 +1252,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND cp.rx_start_time <= ? AND ap.id IS NULL
                 ORDER BY cp.station_name, cp.rx_start_time
@@ -1230,6 +1269,8 @@ class DbManager:
                   ON ap.station_name = cp.station_name
                  AND ap.satellite_name = cp.satellite_name
                  AND ap.pass_date = date(cp.rx_start_time)
+                 AND ap.pass_start_time <= COALESCE(cp.rx_end_time, cp.rx_start_time)
+                 AND COALESCE(ap.pass_end_time, ap.pass_start_time) >= cp.rx_start_time
                  AND ap.success = 1
                 WHERE date(cp.rx_start_time) BETWEEN ? AND ? AND ap.id IS NULL
                 ORDER BY cp.station_name, cp.rx_start_time
