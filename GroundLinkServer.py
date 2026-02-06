@@ -319,13 +319,13 @@ class GroundLinkServer:
         """
         now_utc = datetime.now(timezone.utc)
         # Если считаем статистику за сегодня/будущий день — исключаем пролёты из будущего (rx_start_time > now_utc).
-        if up_to_datetime is None:
-            try:
-                day_date = day.date() if isinstance(day, datetime) else day
-            except Exception:
-                day_date = day
-            if hasattr(day_date, "isoformat") and str(day_date) >= str(now_utc.date()):
-                up_to_datetime = now_utc
+        try:
+            day_date = day.date() if isinstance(day, datetime) else day
+        except Exception:
+            day_date = day
+        is_today = hasattr(day_date, "isoformat") and str(day_date) == str(now_utc.date())
+        if up_to_datetime is None and hasattr(day_date, "isoformat") and str(day_date) >= str(now_utc.date()):
+            up_to_datetime = now_utc
 
         stats_comm, totals_comm = self.db_manager.get_commercial_passes_stats_by_station(
             day, up_to_datetime, pass_type="коммерческий"
@@ -338,7 +338,35 @@ class GroundLinkServer:
             "successful": int(totals_comm.get("successful", 0) or 0) + int(totals_test.get("successful", 0) or 0),
             "not_received": int(totals_comm.get("not_received", 0) or 0) + int(totals_test.get("not_received", 0) or 0),
         }
+        planned_full_day = None
+        planned_remaining_today = None
+        if is_today:
+            planned_full_day = self.db_manager.get_commercial_passes_planned_count(day_date)
+            planned_up_to_now = self.db_manager.get_commercial_passes_planned_count(
+                day_date, up_to_datetime=up_to_datetime
+            )
+            planned_remaining_today = max(0, int(planned_full_day) - int(planned_up_to_now))
         if (not stats_comm and not stats_test) and totals["planned"] == 0:
+            if is_today and planned_full_day:
+                if isinstance(day, datetime):
+                    date_display = day.date().isoformat()
+                elif hasattr(day, "isoformat"):
+                    date_display = day.isoformat()
+                else:
+                    date_display = str(day)
+                return {
+                    "date_display": date_display,
+                    "rows": [],
+                    "totals": {
+                        "planned": totals["planned"],
+                        "successful": totals["successful"],
+                        "not_received": totals["not_received"],
+                        "not_received_percent": 0.0,
+                    },
+                    "not_received_list": [],
+                    "planned_remaining_today": planned_remaining_today,
+                    "planned_full_day": planned_full_day,
+                }
             return None
         if isinstance(day, datetime):
             date_display = day.date().isoformat()
@@ -367,18 +395,7 @@ class GroundLinkServer:
         not_received_list = self.db_manager.get_commercial_passes_not_received_list(day, up_to_datetime)
 
         # Сколько ещё запланировано до конца текущих суток (UTC): считаем только для "сегодня".
-        planned_remaining_today = None
-        if up_to_datetime is not None:
-            try:
-                day_date = day.date() if isinstance(day, datetime) else day
-            except Exception:
-                day_date = None
-            if day_date == up_to_datetime.date():
-                planned_full_day = self.db_manager.get_commercial_passes_planned_count(day_date)
-                planned_up_to_now = self.db_manager.get_commercial_passes_planned_count(
-                    day_date, up_to_datetime=up_to_datetime
-                )
-                planned_remaining_today = max(0, int(planned_full_day) - int(planned_up_to_now))
+        # Сколько ещё запланировано до конца текущих суток (UTC): считаем только для "сегодня".
 
         return {
             "date_display": date_display,
@@ -391,6 +408,7 @@ class GroundLinkServer:
             },
             "not_received_list": not_received_list,
             "planned_remaining_today": planned_remaining_today,
+            "planned_full_day": planned_full_day,
         }
 
     # Вывод статистики коммерческих пролётов за день в консоль.
@@ -399,6 +417,11 @@ class GroundLinkServer:
         if not stats:
             self.logger.info("no commercial stats for day")
             return
+        if not stats.get("rows") and stats.get("totals", {}).get("planned", 0) == 0:
+            planned_full_day = stats.get("planned_full_day")
+            if planned_full_day:
+                self.logger.info(f"запланировано {int(planned_full_day)} витков")
+                return
         date_display = stats["date_display"]
         print(f"\n{Fore.BLUE + Style.BRIGHT}КОММЕРЧЕСКИЕ ПРОЛЁТЫ ЗА ДЕНЬ  {date_display}")
         print(f"{Fore.BLUE}{'Станция':<30} {'Заказано':>12} {'Принято':>12} {'Не принято':>14} {'% не принято':>15}")

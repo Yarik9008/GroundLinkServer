@@ -122,16 +122,19 @@ sudo systemctl start groundlinkserver.service
 Команды управления сервисом:
 
 Старт
+
 ```bash
 sudo systemctl start groundlinkserver.service
 ```
 
 Остановка
+
 ```bash
 sudo systemctl stop groundlinkserver.service
 ```
 
 Перезапуск
+
 ```bash
 sudo systemctl restart groundlinkserver.service
 ```
