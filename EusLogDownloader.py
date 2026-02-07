@@ -993,8 +993,8 @@ if __name__ == "__main__":
     portal = EusLogDownloader(logger=logger)
 
     # Диапазон дат: один день (end_day строго +1).
-    start_dt = datetime(2025, 1, 1, tzinfo=timezone.utc)
-    end_dt = datetime(2026, 1, 30, tzinfo=timezone.utc)
+    start_dt = datetime(2025, 11, 1, tzinfo=timezone.utc)
+    end_dt = datetime(2026, 2, 1, tzinfo=timezone.utc)
     params = (start_dt, end_dt)
 
     # Тест _load_html: получаем HTML и логируем размер.
