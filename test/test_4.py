@@ -32,6 +32,8 @@ from urllib.parse import urlparse, unquote
 import aiohttp
 
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # ---------- Модель данных ----------
 
 @dataclass(frozen=True)
@@ -59,8 +61,17 @@ def iter_items_from_urls_file(urls_path: str, out_dir: str, flat: bool = True) -
     """
     Лениво читает URL из файла (не грузит все 45k URL в память).
     """
-    out = Path(out_dir)
-    with open(urls_path, "r", encoding="utf-8") as f:
+    out_path = Path(out_dir)
+    if not out_path.is_absolute():
+        out_path = BASE_DIR / out_path
+    out_path = out_path.resolve()
+
+    urls_path_p = Path(urls_path)
+    if not urls_path_p.is_absolute():
+        urls_path_p = BASE_DIR / urls_path_p
+    urls_path_p = urls_path_p.resolve()
+
+    with open(urls_path_p, "r", encoding="utf-8") as f:
         for line in f:
             url = line.strip()
             if not url or url.startswith("#"):
@@ -70,7 +81,7 @@ def iter_items_from_urls_file(urls_path: str, out_dir: str, flat: bool = True) -
 
             # flat=True: logs/<filename>
             # flat=False: можно расширить под разбиение по датам/станциям
-            dst = out / filename if flat else out / filename
+            dst = out_path / filename if flat else out_path / filename
             yield Item(url=url, dst=dst)
 
 

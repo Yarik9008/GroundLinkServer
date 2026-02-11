@@ -9,6 +9,8 @@ try:
 except Exception:  # telethon is optional
     TelegramClient = None  # type: ignore[assignment]
 
+BASE_DIR = Path(__file__).resolve().parent
+
 # Алиасы станций по умолчанию (если в config нет telegram.station_aliases)
 DEFAULT_STATION_ALIASES: Dict[str, str] = {
     "MUR": "R3.2S_Murmansk",
@@ -93,11 +95,13 @@ class TelClient:
             dict с ключами api_id, api_hash, channel, session.
         """
         tg = self.config.get("telegram") or {}
-        base_dir = os.path.dirname(os.path.abspath(__file__))
         api_id_raw = tg.get("api_id") or os.getenv("TG_API_ID", "25004944")
         api_hash = tg.get("api_hash") or os.getenv("TG_API_HASH", "3d29770555fbca4b0ea880003ed892bc")
         channel = tg.get("channel") or os.getenv("TG_CHANNEL", "")
-        session = tg.get("session") or os.getenv("TG_SESSION", str(Path(base_dir) / "telegram"))
+        session = tg.get("session") or os.getenv("TG_SESSION") or str(BASE_DIR / "telegram")
+        session_path = Path(str(session))
+        if not session_path.is_absolute():
+            session = str(BASE_DIR / session_path)
         try:
             api_id = int(api_id_raw)
         except (TypeError, ValueError):

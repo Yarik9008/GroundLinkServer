@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
 
@@ -154,6 +155,7 @@ class SatPas:
 
 if __name__ == "__main__":
     # Мини-тест создания нескольких экземпляров
+    BASE_DIR = Path(__file__).resolve().parent
     default_pass = SatPas()
     filled_pass = SatPas(
         pass_id="20260127_031121_FENGYUN 3D",
@@ -169,9 +171,9 @@ if __name__ == "__main__":
         snr_max=18.2,
         snr_sum=100.0,
         log_url="https://example.com/log",
-        log_path="logs/sat-a.log",
+        log_path=str(BASE_DIR / "logs" / "sat-a.log"),
         graph_url="https://example.com/graph",
-        graph_path="graphs/sat-a.png",
+        graph_path=str(BASE_DIR / "graphs" / "sat-a.png"),
         success=True,
     )
     print(default_pass)

@@ -2,6 +2,9 @@ import logging
 import coloredlogs
 from datetime import datetime
 import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 class Logger:
@@ -42,14 +45,20 @@ class Logger:
             self.logs.handlers.clear()
         self.logs.setLevel(log_level_map[log_level])
 
-        # Проверяем, что директория path_log существует.
+        log_dir: Path | None = None
         if path_log:
-            dir_path = os.path.dirname(path_log)
-            if dir_path:
-                os.makedirs(dir_path, exist_ok=True)
+            log_dir = Path(path_log)
+            if not log_dir.is_absolute():
+                log_dir = BASE_DIR / log_dir
+            log_dir = log_dir.resolve()
+            log_dir.mkdir(parents=True, exist_ok=True)
 
         # Имя лог-файла: путь + имя_логгера + дата (YYYY-MM-DD) + .log
-        name = path_log + logger_name + '-' + datetime.now().strftime("%Y-%m-%d") + '.log'
+        log_filename = f"{logger_name}-{datetime.now().strftime('%Y-%m-%d')}.log"
+        if log_dir is None:
+            name = str(Path(log_filename).resolve())
+        else:
+            name = str(log_dir / log_filename)
 
         # Обработчик для записи в файл.
         self.file = logging.FileHandler(name, encoding="utf-8")

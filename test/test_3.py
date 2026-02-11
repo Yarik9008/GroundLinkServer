@@ -7,7 +7,7 @@ from pathlib import Path
 
 from telethon import TelegramClient, events
 
-BASE_DIR = Path("/root/lorett/GroundLinkServer")
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def load_telegram_comm_config() -> dict:

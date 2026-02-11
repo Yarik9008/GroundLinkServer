@@ -24,6 +24,8 @@ from TelClient import TelClient
 from colorama import Fore, Style, init as colorama_init
 colorama_init(autoreset=True)
 
+BASE_DIR = Path(__file__).resolve().parent
+
 
 class GroundLinkServer:
     """Основной сервер: загрузка логов, анализ, БД, статистика, email.
@@ -89,8 +91,7 @@ class GroundLinkServer:
         Returns:
             dict: Конфигурация или {} при ошибке.
         """
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(base_dir, "config.json")
+        config_path = BASE_DIR / "config.json"
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -729,8 +730,11 @@ class GroundLinkServer:
                         "unsuccessful_filenames": unsuccessful_filenames,
                     }
                 # Каталог для графиков: report/YYYY/MM/DD (совпадает со структурой EusLogDownloader)
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                report_dir = Path(self.config.get("report_dir") or os.path.join(base_dir, "report"))
+                report_dir_raw = self.config.get("report_dir") or (BASE_DIR / "report")
+                report_dir = Path(report_dir_raw)
+                if not report_dir.is_absolute():
+                    report_dir = BASE_DIR / report_dir
+                report_dir = report_dir.resolve()
                 year = current_day.strftime("%Y")
                 month = current_day.strftime("%m")
                 day = current_day.strftime("%d")
@@ -875,8 +879,11 @@ class GroundLinkServer:
                     else:
                         stations_set = set()
 
-                    base_dir = os.path.dirname(os.path.abspath(__file__))
-                    report_dir = Path(self.config.get("report_dir") or os.path.join(base_dir, "report"))
+                    report_dir_raw = self.config.get("report_dir") or (BASE_DIR / "report")
+                    report_dir = Path(report_dir_raw)
+                    if not report_dir.is_absolute():
+                        report_dir = BASE_DIR / report_dir
+                    report_dir = report_dir.resolve()
                     year = current_day.strftime("%Y")
                     month = current_day.strftime("%m")
                     day = current_day.strftime("%d")
@@ -1007,8 +1014,7 @@ class GroundLinkServer:
             start_day: Дата начала диапазона.
             end_day: Дата конца диапазона.
         """
-        base_dir = os.path.dirname(__file__)
-        passes_logs_dir = os.path.join(base_dir, "passes_logs")
+        passes_logs_dir = str((BASE_DIR / "passes_logs").resolve())
         # Загружаем HTML страницу со всем диапазоном дат.
         # дата начала
         start_dt = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
@@ -1077,8 +1083,8 @@ class GroundLinkServer:
 if __name__ == "__main__":
 
     # путь к каталогу для сохранения логов
-    BASE_DIR = Path("/root/lorett/GroundLinkServer")
-    PATH_LOG = str(BASE_DIR / "server_logs") + os.sep
+    BASE_DIR = Path(__file__).resolve().parent
+    PATH_LOG = str(BASE_DIR / "server_logs")
 
     # парсинг аргументов командной строки
     parser = argparse.ArgumentParser()

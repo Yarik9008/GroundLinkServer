@@ -14,7 +14,14 @@ from typing import Optional, Tuple
 from Logger import Logger
 from SatPass import SatPas
 
-BASE_DIR = Path("/root/lorett/GroundLinkServer")
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def _resolve_path(value: str | Path) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path.resolve()
 
 
 class EusLogDownloader:
@@ -333,6 +340,7 @@ class EusLogDownloader:
 
         try:
             if errors_log_path:
+                errors_log_path = str(_resolve_path(errors_log_path))
                 os.makedirs(os.path.dirname(errors_log_path) or ".", exist_ok=True)
                 stats["errors_file"] = open(errors_log_path, "a", encoding="utf-8")
 
@@ -477,6 +485,7 @@ class EusLogDownloader:
         Returns:
             str: Путь к PNG или исключение.
         """
+        out_dir = str(_resolve_path(out_dir))
         # создаем каталог для сохранения
         os.makedirs(out_dir, exist_ok=True)
         # извлекаем имя файла лога из URL
@@ -829,6 +838,7 @@ class EusLogDownloader:
             list: Тот же список SatPas с заполненным log_path.
         """
 
+        out_dir = str(_resolve_path(out_dir))
         # создаем каталог для сохранения
         os.makedirs(out_dir, exist_ok=True)
         tasks = []

@@ -15,15 +15,17 @@ PASSWORD = "sftppass123"
 # Можно оставить как есть или заменить на свой ключ (ssh-ed25519 ...).
 CLIENT_PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEt0Tp28uwuL7AEKaggEd3D8TD8ZE2Grlk5OqjU8FqSL lorett-sftp"
 
-SFTP_ROOT = Path("./sftp_root").resolve()  # chroot
+BASE_DIR = Path(__file__).resolve().parent
+
+SFTP_ROOT = (BASE_DIR / "sftp_root").resolve()  # chroot
 UPLOAD_DIR = SFTP_ROOT / "uploads"         # внутри chroot: /uploads
 
-SSHD_CONFIG_PATH = Path("./sshd_config").resolve()
-PID_FILE = Path("./sshd.pid").resolve()
+SSHD_CONFIG_PATH = (BASE_DIR / "sshd_config").resolve()
+PID_FILE = (BASE_DIR / "sshd.pid").resolve()
 
 # Host keys (создадим автоматически, если нет)
-HOST_KEY_ED25519 = Path("./ssh_host_ed25519_key").resolve()
-HOST_KEY_RSA = Path("./ssh_host_rsa_key").resolve()
+HOST_KEY_ED25519 = (BASE_DIR / "ssh_host_ed25519_key").resolve()
+HOST_KEY_RSA = (BASE_DIR / "ssh_host_rsa_key").resolve()
 
 # Куда sshd будет смотреть authorized_keys (читается ДО chroot)
 AUTHORIZED_KEYS_DIR = Path("/etc/ssh/authorized_keys")
@@ -107,7 +109,7 @@ def install_authorized_key_if_present() -> None:
 
     # 3) Через файл рядом со скриптом
     if not key_text:
-        pubkey_path = Path("./client_ed25519.pub").resolve()
+        pubkey_path = (BASE_DIR / "client_ed25519.pub").resolve()
         if pubkey_path.exists():
             key_text = pubkey_path.read_text(encoding="utf-8").strip()
 

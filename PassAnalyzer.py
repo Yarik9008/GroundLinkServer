@@ -535,7 +535,7 @@ class PassAnalyzer:
 
 
 if __name__ == "__main__":
-    BASE_DIR = Path("/root/lorett/GroundLinkServer")
+    BASE_DIR = Path(__file__).resolve().parent
     LOG_PATH = str(BASE_DIR / "server_logs")
     LOGS_ROOT = str(BASE_DIR / "passes_logs")
 

@@ -5,6 +5,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from SatPass import SatPas
 from Logger import Logger
 
+BASE_DIR = Path(__file__).resolve().parent
+
 
 class DbManager:
     """SQLite менеджер для станций, пролетов и дневной статистики.
@@ -41,7 +43,7 @@ class DbManager:
     def __init__(
         self,
         logger: Logger,
-        db_path: str | Path = "groundlink.db",
+        db_path: str | Path = BASE_DIR / "groundlink.db",
         ) -> None:
         """Инициализирует менеджер и задает параметры подключения.
 
@@ -49,7 +51,10 @@ class DbManager:
             logger: Объект логгера.
             db_path: Путь к файлу SQLite.
         """
-        self.db_path = str(db_path)  # путь к базе данных
+        db_path = Path(db_path)
+        if not db_path.is_absolute():
+            db_path = BASE_DIR / db_path
+        self.db_path = str(db_path.resolve())  # путь к базе данных
         self.logger = logger  # объект логгера
         self._ensure_parent_dir()
         self._conn: Optional[sqlite3.Connection] = sqlite3.connect(self.db_path)
@@ -1472,7 +1477,7 @@ class DbManager:
 if __name__ == "__main__":
     # Простой тестовый сценарий, аналогичный примерам в EusLogDownloader.py
     # Используем основную БД проекта.
-    BASE_DIR = Path("/root/lorett/GroundLinkServer")
+    BASE_DIR = Path(__file__).resolve().parent
     logger = Logger(path_log="db_manager", log_level="info")
     db = DbManager(logger=logger)
 
